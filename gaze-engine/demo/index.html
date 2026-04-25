@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Catalyst for Care — AAC Demo</title>
+  <link rel="stylesheet" href="./style.css" />
+  <!--
+    WebGazer must be a plain <script> (not ESM) so it registers window.webgazer
+    before our module runs. Only loaded if user picks webcam mode.
+  -->
+</head>
+<body>
+  <div id="app">
+
+    <!-- ── Landing ─────────────────────────────────────────────────── -->
+    <section id="screen-landing" class="screen active">
+      <div class="landing-content">
+        <div class="logo">👁 Catalyst for Care</div>
+        <h1>AAC Communication Demo</h1>
+        <p>Hold your gaze — or your mouse — over a tile for 1.2 seconds to speak it.</p>
+        <div class="mode-cards">
+          <button class="mode-card" id="btn-mouse">
+            <div class="mode-icon">🖱️</div>
+            <div class="mode-title">Mouse Mode</div>
+            <div class="mode-desc">Hover tiles to select — works instantly, no webcam needed</div>
+          </button>
+          <button class="mode-card" id="btn-webcam">
+            <div class="mode-icon">📷</div>
+            <div class="mode-title">Webcam Mode</div>
+            <div class="mode-desc">Real gaze tracking — click 9 calibration dots first</div>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Calibration (webcam only) ──────────────────────────────── -->
+    <section id="screen-calibration" class="screen">
+      <div class="calib-header">
+        <h2>Calibration</h2>
+        <p id="calib-instruction">Stare at the glowing dot, then click it. Repeat for all 9 points.</p>
+        <div class="calib-counter">
+          Point <span id="calib-n">1</span> / 9
+          &nbsp;·&nbsp;
+          Click <span id="calib-clicks">0</span> / 3
+        </div>
+      </div>
+      <!-- Dots injected here by JS -->
+      <div id="calib-surface"></div>
+      <button class="ghost-btn" id="btn-skip-calib">Skip calibration →</button>
+    </section>
+
+    <!-- ── AAC Board ───────────────────────────────────────────────── -->
+    <section id="screen-board" class="screen">
+      <header id="board-header">
+        <button class="ghost-btn" id="btn-back">← Back</button>
+        <div id="speech-bubble">
+          <span id="speech-icon">💬</span>
+          <span id="speech-text">Look at a tile to speak…</span>
+        </div>
+        <div id="mode-badge"></div>
+      </header>
+      <main id="tile-grid">
+        <!-- Tiles injected by JS -->
+      </main>
+    </section>
+
+  </div>
+
+  <!-- Gaze cursor — floats above everything -->
+  <div id="gaze-cursor"></div>
+
+  <script type="module" src="./main.ts"></script>
+</body>
+</html>

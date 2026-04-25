@@ -1,0 +1,37 @@
+{
+  "name": "@catalyst/gaze-engine",
+  "version": "0.1.0",
+  "description": "Webcam gaze tracking → tile dwell selection events",
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "harness": "tsx examples/node-harness.ts",
+    "dev": "vite --config vite.demo.config.ts"
+  },
+  "devDependencies": {
+    "@mediapipe/tasks-vision": "^0.10.34",
+    "@types/node": "^20.12.0",
+    "tsx": "^4.7.0",
+    "typescript": "^5.4.0",
+    "vite": "^5.2.0",
+    "vitest": "^1.5.0"
+  },
+  "peerDependencies": {
+    "webgazer": "^2.1.0"
+  },
+  "peerDependenciesMeta": {
+    "webgazer": {
+      "optional": true
+    }
+  }
+}
