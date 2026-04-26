@@ -30,12 +30,16 @@ The HTTP Gateway (`agents/http_gateway.py`, port 8000) is a FastAPI server that 
 ## Relevant Links for Fetch.ai: 
 ASI:ONE Chats -
 Ideating all the agents: https://asi1.ai/shared-chat/a46dc48b-820e-4153-8af9-e4f9527b295b
+
 Testing communication-router-agent: https://asi1.ai/shared-chat/41601302-d27d-4184-af71-05445fb51be9
 
 Agentverse Agents - 
 user-context-agent: https://agentverse.ai/agents/details/agent1qtqrmd7du8kha6xc9l42uwr4clq35slmq633zqvdxa5exgqgnhgjksp5xs4/profile
+
 output-generation-agent: https://agentverse.ai/agents/details/agent1q2akqd8p697zw4y92gp03w47m2824guaj6rqk4h875vz9q3pyad8xnle46n/profile
+
 communication-router-agent: https://agentverse.ai/agents/details/agent1qdjesxt4sxndwgjk3gzemtm02f9lzm85wyhj2ct3jalmq2utrn887najgdd/profile
+
 gaze-intent-agent: https://agentverse.ai/agents/details/agent1qty3naahpus39hcfffhl0dtznrntjc2yp304m693tcva3krwfwkfvn3mx95/profile
 
 ### Figma Make Challenge
