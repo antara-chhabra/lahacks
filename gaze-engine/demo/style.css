@@ -103,7 +103,7 @@ html, body {
 .calib-counter    { font-size: 0.85rem; color: var(--accent); font-weight: 600; }
 .calib-progress   { font-size: 0.8rem; color: var(--text-muted); font-style: italic; min-height: 1.2em; }
 
-#calib-surface { position: fixed; inset: 0; pointer-events: none; z-index: 10; }
+#calib-surface { position: fixed; inset: 0; pointer-events: none; z-index: 600; }
 
 .calib-dot {
   position: absolute;

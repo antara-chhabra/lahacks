@@ -46,12 +46,15 @@ export async function analyzeSession(data: SessionData): Promise<SessionSummary>
   const duration = Math.max(data.duration, 1);
   const interval = duration / (FRAME_COUNT + 1);
 
-  // Fetch frames in parallel
-  const framePromises = Array.from({ length: FRAME_COUNT }, (_, i) => {
-    const sec = Math.round(interval * (i + 1));
-    return fetchFrameAsBase64(data.videoPublicId, sec);
-  });
-  const frames = (await Promise.all(framePromises)).filter(Boolean) as string[];
+  // Fetch frames only when video was successfully uploaded
+  const frames: string[] = [];
+  if (data.videoPublicId) {
+    const framePromises = Array.from({ length: FRAME_COUNT }, (_, i) => {
+      const sec = Math.round(interval * (i + 1));
+      return fetchFrameAsBase64(data.videoPublicId, sec);
+    });
+    frames.push(...((await Promise.all(framePromises)).filter(Boolean) as string[]));
+  }
 
   const transcript = data.messagesSent.length > 0
     ? data.messagesSent.map((m, i) => `${i + 1}. "${m}"`).join('\n')
@@ -85,7 +88,7 @@ Be concise, compassionate, and clinically useful. Do not fabricate details — o
 - Messages sent: ${data.messagesSent.length}
 - User ID: ${data.userId}
 
-${frames.length} video frames extracted at ~${Math.round(interval)}s intervals.
+${frames.length > 0 ? `${frames.length} video frames extracted at ~${Math.round(interval)}s intervals.` : 'No video frames available — text-only analysis.'}
 
 Session transcript:
 ${transcript}

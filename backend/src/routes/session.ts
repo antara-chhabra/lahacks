@@ -10,11 +10,6 @@ router.post('/end', async (req, res, next) => {
   try {
     const data = req.body as SessionData;
 
-    if (!data.videoPublicId || !data.videoUrl) {
-      res.status(400).json({ error: 'videoPublicId and videoUrl are required' });
-      return;
-    }
-
     const summary = await analyzeSession(data);
 
     const db = getDB();

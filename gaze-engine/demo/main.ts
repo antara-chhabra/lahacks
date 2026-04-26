@@ -92,12 +92,16 @@ function showScreen(id: string) {
 
 // ── Calibration ───────────────────────────────────────────────────────────────
 
-// 6-point grid: top row + bottom row, center clear for the video preview
+// 7-point grid: top row + centre + bottom row.
+// Centre point is essential for accurate middle-screen interpolation (word tiles live there).
+// Video preview is centred during calibration; calib-surface has z-index > video so dots appear on top.
 const CALIB_GRID = [
   { x: 0.1, y: 0.1 }, { x: 0.5, y: 0.1 }, { x: 0.9, y: 0.1 },
+  { x: 0.5, y: 0.5 }, // centre — critical for IDW accuracy across the word-tile area
   { x: 0.1, y: 0.9 }, { x: 0.5, y: 0.9 }, { x: 0.9, y: 0.9 },
 ];
 const HOLD_MS = 1000; // longer hold = more stable calibration samples
+const CALIB_PRE_DELAY_MS = 250; // wait after click before sampling (lets gaze settle)
 const POLL_MS = 33;
 
 function runWebcamCalibration(source: MediaPipeGazeSource): Promise<CalibrationSample[]> {
@@ -118,6 +122,10 @@ function runWebcamCalibration(source: MediaPipeGazeSource): Promise<CalibrationS
       surface.appendChild(dot);
       return dot;
     });
+
+    // Show correct total dynamically
+    document.querySelector('.calib-counter')!.innerHTML =
+      `Point <span id="calib-n">1</span> / ${CALIB_GRID.length}`;
 
     let current = 0;
     let capturing = false;
@@ -149,13 +157,17 @@ function runWebcamCalibration(source: MediaPipeGazeSource): Promise<CalibrationS
       dots[i].classList.add('capturing');
       progressEl.textContent = 'Holding… keep your gaze steady';
 
-      const timer = setInterval(() => {
-        const raw = source.lastRaw;
-        if (raw) rawBuf.push({ x: raw.x, y: raw.y });
-      }, POLL_MS);
+      // Brief delay after click lets eye micro-movements settle before sampling
+      let timer: ReturnType<typeof setInterval>;
+      setTimeout(() => {
+        timer = setInterval(() => {
+          const raw = source.lastRaw;
+          if (raw) rawBuf.push({ x: raw.x, y: raw.y });
+        }, POLL_MS);
+      }, CALIB_PRE_DELAY_MS);
 
       setTimeout(() => {
-        clearInterval(timer);
+        clearInterval(timer!);
         if (rawBuf.length >= 3) {
           const cx = rawBuf.reduce((s, p) => s + p.x, 0) / rawBuf.length;
           const cy = rawBuf.reduce((s, p) => s + p.y, 0) / rawBuf.length;
@@ -240,7 +252,7 @@ function setWordTileLabels(words: string[], engine: GazeEngine) {
       const el = document.getElementById(id);
       if (!el) continue;
       const r = el.getBoundingClientRect();
-      engine.registerTarget({ id, rect: { x: r.left-10, y: r.top-10, width: r.width+20, height: r.height+20 }, label: id });
+      engine.registerTarget({ id, rect: { x: r.left-20, y: r.top-20, width: r.width+40, height: r.height+40 }, label: id });
     }
   });
 }
@@ -274,7 +286,7 @@ function buildBoard(engine: GazeEngine) {
       const r = document.getElementById(id)!.getBoundingClientRect();
       engine.registerTarget({
         id,
-        rect: { x: r.left - 10, y: r.top - 10, width: r.width + 20, height: r.height + 20 },
+        rect: { x: r.left - 20, y: r.top - 20, width: r.width + 40, height: r.height + 40 },
         label: id,
       });
     }
@@ -403,7 +415,21 @@ async function startBoard(source: GazeSource, calibration?: CalibrationProfile):
   cursor.style.display = 'block';
   engine.onGaze(pt => moveCursor(pt.x, pt.y));
 
+  // Track the last tile that was dwelled so we can reset its ring when gaze moves away
+  let lastDwellId: string | null = null;
+
   engine.onDwellProgress((id, progress) => {
+    // When gaze moves to a different target, fully reset the previous one
+    if (lastDwellId && lastDwellId !== id) {
+      const prev = document.getElementById(lastDwellId);
+      if (prev) {
+        const prevFill = prev.querySelector('.ring-fill') as SVGCircleElement | null;
+        if (prevFill) prevFill.style.strokeDashoffset = String(CIRC);
+        prev.classList.remove('dwelling', 'btn-dwelling');
+      }
+    }
+    lastDwellId = id;
+
     const el = document.getElementById(id);
     if (!el) return;
     // Header buttons: highlight border as dwell indicator
@@ -441,7 +467,7 @@ async function startBoard(source: GazeSource, calibration?: CalibrationProfile):
       const el = document.getElementById(id);
       if (!el) continue;
       const r = el.getBoundingClientRect();
-      engine.registerTarget({ id, rect: { x: r.left-10, y: r.top-10, width: r.width+20, height: r.height+20 }, label: id });
+      engine.registerTarget({ id, rect: { x: r.left-20, y: r.top-20, width: r.width+40, height: r.height+40 }, label: id });
     }
     for (const id of HEADER_BTN_IDS) {
       const el = document.getElementById(id);
@@ -499,15 +525,26 @@ function wireButtons(engine: GazeEngine, calibration: CalibrationProfile | undef
     contentEl.innerHTML = '';
 
     try {
+      const duration = Math.round((Date.now() - recorder.startTime) / 1000);
       const blob = await recorder.stop();
-      const { publicId, secureUrl } = await uploadToCloudinary(blob, CLOUDINARY_CLOUD, CLOUDINARY_PRESET);
+
+      // Try to upload video; fall back to text-only summary if upload fails
+      let videoUrl = '';
+      let videoPublicId = '';
+      try {
+        const upload = await uploadToCloudinary(blob, CLOUDINARY_CLOUD, CLOUDINARY_PRESET);
+        videoUrl = upload.secureUrl;
+        videoPublicId = upload.publicId;
+      } catch (uploadErr) {
+        console.warn('Video upload failed — generating text-only summary:', uploadErr);
+      }
 
       const payload: SessionData = {
         userId: USER_ID,
         sessionId: SESSION_ID,
-        videoUrl: secureUrl,
-        videoPublicId: publicId,
-        duration: Math.round((Date.now() - recorder.startTime) / 1000),
+        videoUrl,
+        videoPublicId,
+        duration,
         events: sessionEvents,
         messagesSent: sessionMessages,
       };
@@ -518,7 +555,10 @@ function wireButtons(engine: GazeEngine, calibration: CalibrationProfile | undef
         body: JSON.stringify(payload),
       });
 
-      if (!res.ok) throw new Error(`Backend error: ${res.status}`);
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(`Backend error ${res.status}: ${errText}`);
+      }
       const summary: SessionSummary = await res.json();
 
       loadingEl.classList.add('hidden');
