@@ -44,8 +44,15 @@
         </div>
         <button class="ghost-btn" id="btn-recalibrate">Recalibrate</button>
         <div id="mode-badge">👁 Webcam</div>
+        <div class="key-hints"><kbd>Space</kbd> Send &nbsp; <kbd>⌫</kbd> Undo</div>
         <button class="ghost-btn bye-btn" id="btn-bye">👋 End Session</button>
       </header>
+
+      <!-- Agent response strip — hidden until agent replies -->
+      <div id="agent-response" class="agent-response hidden">
+        <span class="agent-label">Agent</span>
+        <span id="agent-response-text"></span>
+      </div>
 
       <!-- 4 word tiles + 2 controls in a 2×3 grid -->
       <main id="word-grid">
@@ -56,6 +63,7 @@
   </div>
 
   <div id="gaze-cursor"></div>
+  <div id="gaze-debug"></div>
 
   <!-- Session summary modal — shown after End Session -->
   <div id="summary-modal" class="modal-overlay hidden">

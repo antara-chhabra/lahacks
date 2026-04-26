@@ -1,4 +1,4 @@
-import Anthropic from '@anthropic-ai/sdk';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 
 // Mirrors claudinary-video/src/types.ts — kept local to avoid cross-package resolution issues
 export interface SessionEvent {
@@ -26,7 +26,7 @@ export interface SessionSummary {
   generatedAt: number;
 }
 
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+const genai = new GoogleGenerativeAI(process.env.GEMINI_API_KEY ?? '');
 const CLOUD_NAME = process.env.CLOUDINARY_CLOUD_NAME ?? 'dsddkg2x6';
 const FRAME_COUNT = 8;
 
@@ -62,11 +62,6 @@ export async function analyzeSession(data: SessionData): Promise<SessionSummary>
 
   const wordSelectCount = data.events.filter(e => e.type === 'word_select').length;
 
-  const imageBlocks: Anthropic.ImageBlockParam[] = frames.map(b64 => ({
-    type: 'image',
-    source: { type: 'base64', media_type: 'image/jpeg', data: b64 },
-  }));
-
   const systemPrompt = `You are a clinical observer reviewing an AAC (Augmentative and Alternative Communication) session for a patient with ALS, stroke, or motor decline. The patient communicates by gazing at tiles.
 
 Analyze the video frames and session data carefully. Return ONLY a valid JSON object with these exact keys:
@@ -78,11 +73,7 @@ Analyze the video frames and session data carefully. Return ONLY a valid JSON ob
 
 Be concise, compassionate, and clinically useful. Do not fabricate details — only report what is observable.`;
 
-  const userContent: Anthropic.MessageParam['content'] = [
-    ...imageBlocks,
-    {
-      type: 'text',
-      text: `Session details:
+  const textPart = `Session details:
 - Duration: ${duration} seconds
 - Tile selections made: ${wordSelectCount}
 - Messages sent: ${data.messagesSent.length}
@@ -93,22 +84,21 @@ ${frames.length > 0 ? `${frames.length} video frames extracted at ~${Math.round(
 Session transcript:
 ${transcript}
 
-Please analyze this session and return the JSON summary.`,
-    },
-  ];
+Please analyze this session and return the JSON summary.`;
 
-  const response = await client.messages.create({
-    model: 'claude-sonnet-4-6',
-    max_tokens: 1024,
-    system: systemPrompt,
-    messages: [{ role: 'user', content: userContent }],
-  });
+  const imageParts = frames.map(b64 => ({
+    inlineData: { mimeType: 'image/jpeg' as const, data: b64 },
+  }));
 
-  const raw = response.content.find(b => b.type === 'text')?.text ?? '{}';
+  const model = genai.getGenerativeModel(
+    { model: 'gemini-1.5-flash', systemInstruction: systemPrompt },
+    { apiVersion: 'v1' },
+  );
+  const result = await model.generateContent([...imageParts, textPart]);
+  const raw = result.response.text() ?? '{}';
 
   let parsed: Partial<SessionSummary>;
   try {
-    // Strip markdown fences if present
     const cleaned = raw.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim();
     parsed = JSON.parse(cleaned);
   } catch {

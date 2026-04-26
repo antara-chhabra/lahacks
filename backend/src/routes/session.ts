@@ -10,6 +10,11 @@ router.post('/end', async (req, res, next) => {
   try {
     const data = req.body as SessionData;
 
+    if (!data.messagesSent || data.messagesSent.length === 0) {
+      res.status(400).json({ error: 'Insufficient information to generate a report. At least one message must be sent during the session.' });
+      return;
+    }
+
     const summary = await analyzeSession(data);
 
     const db = getDB();

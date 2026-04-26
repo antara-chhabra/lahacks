@@ -34,6 +34,66 @@ Webcam
 | [cloudinary-assets/](cloudinary-assets/README.md) | C | Icon upload, theme presets, tile manifest |
 | [backend/](backend/README.md) | D | REST API + MongoDB Atlas Vector Search |
 
+## Running the app (newversion9pm branch)
+
+This is the current working setup. Run all three services in separate terminals.
+
+### Prerequisites
+
+Create the following `.env` files (values are in team 1Password / Notion):
+
+**`backend/.env`**
+```
+MONGODB_URI=<atlas connection string>
+GEMINI_API_KEY=<google ai studio key>
+CLOUDINARY_CLOUD_NAME=dsddkg2x6
+CLOUDINARY_API_KEY=<cloudinary api key>
+CLOUDINARY_API_SECRET=<cloudinary api secret>
+PORT=3001
+```
+
+**`frontend/.env`**
+```
+VITE_CLOUDINARY_CLOUD_NAME=dsddkg2x6
+VITE_CLOUDINARY_UPLOAD_PRESET=Lahacks
+VITE_AGENT_URL=http://localhost:8000
+VITE_BACKEND_URL=http://localhost:3001
+VITE_DEMO_USER_ID=demo-1
+```
+
+**`agents/.env`**
+```
+ASI1_API_KEY=<asi1 api key>
+```
+
+### Terminal 1 — Backend (port 3001)
+
+```bash
+cd backend
+npm install
+npm run dev
+```
+
+### Terminal 2 — Agent gateway (port 8000)
+
+```bash
+cd agents
+pip3 install fastapi python-dotenv
+python3 http_gateway.py
+```
+
+### Terminal 3 — Gaze-engine demo (port 5173)
+
+```bash
+cd gaze-engine
+npm install
+npm run dev
+```
+
+Open **http://localhost:5173** — click "Start with Webcam", complete the 8-point calibration, then look at tiles to compose a message. Dwell on **SEND** to fire the agent pipeline (response appears in the banner above the tiles). Dwell on **End Session** for a Gemini-generated session summary.
+
+---
+
 ## Quick start (integration day)
 
 ```bash

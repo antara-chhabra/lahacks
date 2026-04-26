@@ -72,6 +72,19 @@ function getNextWords(text: string): string[] {
   return DEFAULT_WORDS;
 }
 
+// ── Agent response ────────────────────────────────────────────────────────────
+
+function showAgentResponse(text: string) {
+  const banner = document.getElementById('agent-response')!;
+  const textEl = document.getElementById('agent-response-text')!;
+  textEl.textContent = text;
+  banner.classList.remove('hidden');
+}
+
+function clearAgentResponse() {
+  document.getElementById('agent-response')!.classList.add('hidden');
+}
+
 // ── Text state ────────────────────────────────────────────────────────────────
 
 let composedText = '';
@@ -92,13 +105,12 @@ function showScreen(id: string) {
 
 // ── Calibration ───────────────────────────────────────────────────────────────
 
-// 7-point grid: top row + centre + bottom row.
-// Centre point is essential for accurate middle-screen interpolation (word tiles live there).
-// Video preview is centred during calibration; calib-surface has z-index > video so dots appear on top.
+// 8-point grid: avoids the header text (top ~15%) and the centred video feed (~40-60% centre).
+// Two mid-row side points replace the single centre dot that overlapped the video preview.
 const CALIB_GRID = [
-  { x: 0.1, y: 0.1 }, { x: 0.5, y: 0.1 }, { x: 0.9, y: 0.1 },
-  { x: 0.5, y: 0.5 }, // centre — critical for IDW accuracy across the word-tile area
-  { x: 0.1, y: 0.9 }, { x: 0.5, y: 0.9 }, { x: 0.9, y: 0.9 },
+  { x: 0.1, y: 0.2  }, { x: 0.5, y: 0.2  }, { x: 0.9, y: 0.2  }, // top row — below header
+  { x: 0.08, y: 0.55 },                       { x: 0.92, y: 0.55 }, // mid sides — clear of video
+  { x: 0.1, y: 0.87 },                        { x: 0.9, y: 0.87 }, // bottom corners — centre omitted to clear "Skip" button
 ];
 const HOLD_MS = 1000; // longer hold = more stable calibration samples
 const CALIB_PRE_DELAY_MS = 250; // wait after click before sampling (lets gaze settle)
@@ -109,28 +121,26 @@ function runWebcamCalibration(source: MediaPipeGazeSource): Promise<CalibrationS
 
   return new Promise(resolve => {
     const surface    = document.getElementById('calib-surface')!;
-    const nEl        = document.getElementById('calib-n')!;
     const progressEl = document.getElementById('calib-progress')!;
     surface.innerHTML = '';
 
-    const dots = CALIB_GRID.map((pos, i) => {
+    const dots = CALIB_GRID.map((pos) => {
       const dot = document.createElement('div');
       dot.className = 'calib-dot';
       dot.style.left = `${pos.x * 100}vw`;
       dot.style.top  = `${pos.y * 100}vh`;
-      if (i !== 0) dot.style.opacity = '0.3';
       surface.appendChild(dot);
       return dot;
     });
 
-    // Show correct total dynamically
+    // Replace counter HTML — must query #calib-n AFTER this line
     document.querySelector('.calib-counter')!.innerHTML =
       `Point <span id="calib-n">1</span> / ${CALIB_GRID.length}`;
+    const nEl = document.getElementById('calib-n')!;
 
     let current = 0;
     let capturing = false;
     dots[0].classList.add('active');
-    nEl.textContent = '1';
     progressEl.textContent = 'Click the dot, then hold still';
 
     const advance = () => {
@@ -145,7 +155,6 @@ function runWebcamCalibration(source: MediaPipeGazeSource): Promise<CalibrationS
       }
       nEl.textContent = String(current + 1);
       progressEl.textContent = 'Click the dot, then hold still';
-      dots[current].style.opacity = '1';
       dots[current].classList.add('active');
     };
 
@@ -240,6 +249,7 @@ function makeTileHTML(label: string): string {
 
 function setWordTileLabels(words: string[], engine: GazeEngine, weights?: number[]) {
   const maxW = weights && weights.length ? Math.max(...weights, 1) : 10;
+  let allEmpty = true;
   for (let i = 0; i < WORD_TILE_IDS.length; i++) {
     const el = document.getElementById(WORD_TILE_IDS[i])!;
     const label = words[i] ?? '';
@@ -247,12 +257,16 @@ function setWordTileLabels(words: string[], engine: GazeEngine, weights?: number
     const wordEl = el.querySelector('.tile-word') as HTMLElement;
     if (wordEl) wordEl.textContent = label;
     el.classList.toggle('empty', !label);
+    if (label) allEmpty = false;
 
     const bar = el.querySelector('.tile-prob-bar') as HTMLElement | null;
     if (bar) {
       const pct = weights ? Math.round((weights[i] ?? 0) / maxW * 100) : 0;
       bar.style.width = `${pct}%`;
     }
+  }
+  if (allEmpty) {
+    showAgentResponse('Please send or undo a word.');
   }
   // Re-register targets so dwell detection picks up any rect changes
   requestAnimationFrame(() => {
@@ -269,6 +283,14 @@ function buildBoard(engine: GazeEngine) {
   const grid = document.getElementById('word-grid')!;
   grid.innerHTML = '';
 
+  // UNDO goes first in DOM — CSS places it in col 1 spanning both rows
+  const undo = document.createElement('div');
+  undo.className = 'tile ctrl-tile ctrl-undo';
+  undo.id = CTRL_UNDO;
+  undo.innerHTML = makeTileHTML('⌫ UNDO');
+  grid.appendChild(undo);
+
+  // Word tiles in cols 2-3
   for (const id of WORD_TILE_IDS) {
     const el = document.createElement('div');
     el.className = 'tile word-tile';
@@ -277,12 +299,7 @@ function buildBoard(engine: GazeEngine) {
     grid.appendChild(el);
   }
 
-  const undo = document.createElement('div');
-  undo.className = 'tile ctrl-tile ctrl-undo';
-  undo.id = CTRL_UNDO;
-  undo.innerHTML = makeTileHTML('⌫ UNDO WORD');
-  grid.appendChild(undo);
-
+  // SEND goes last — CSS places it in col 4 spanning both rows
   const send = document.createElement('div');
   send.className = 'tile ctrl-tile ctrl-send';
   send.id = CTRL_SEND;
@@ -292,9 +309,11 @@ function buildBoard(engine: GazeEngine) {
   requestAnimationFrame(() => {
     for (const id of ALL_TILE_IDS) {
       const r = document.getElementById(id)!.getBoundingClientRect();
+      // SEND and UNDO get a much larger hit area — they sit at screen edges and are hard to reach
+      const pad = (id === CTRL_UNDO || id === CTRL_SEND) ? 100 : 20;
       engine.registerTarget({
         id,
-        rect: { x: r.left - 20, y: r.top - 20, width: r.width + 40, height: r.height + 40 },
+        rect: { x: r.left - pad, y: r.top - pad, width: r.width + pad * 2, height: r.height + pad * 2 },
         label: id,
       });
     }
@@ -325,7 +344,7 @@ async function refreshWordTiles(engine: GazeEngine) {
       const data = await res.json() as { words?: string[]; weights?: number[] };
       const words   = data.words   ?? [];
       const weights = data.weights ?? [10, 7, 4, 2];
-      if (Array.isArray(words) && words.length === 4) {
+      if (Array.isArray(words) && words.length === 4 && words.some(w => w.trim())) {
         setWordTileLabels(words, engine, weights);
       }
     }
@@ -351,6 +370,7 @@ function handleSelect(id: string, engine: GazeEngine) {
     speak(text);
     sessionMessages.push(text);
     sessionEvents.push({ timestamp: Date.now(), type: 'send', value: text });
+    showAgentResponse('…');
     fetch(`${AGENT_URL}/intent`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -361,7 +381,18 @@ function handleSelect(id: string, engine: GazeEngine) {
         session_id: SESSION_ID,
         user_id: USER_ID,
       }),
-    }).catch(() => {});
+    })
+      .then(r => r.ok ? r.json() : null)
+      .then((data: { message?: { text?: string; audio_url?: string } } | null) => {
+        if (data?.message?.text) {
+          showAgentResponse(data.message.text);
+          speak(data.message.text);
+          if (data.message.audio_url) new Audio(data.message.audio_url).play().catch(() => null);
+        } else {
+          clearAgentResponse();
+        }
+      })
+      .catch(() => clearAgentResponse());
     composedText = '';
     updateDisplay();
     refreshWordTiles(engine);
@@ -371,6 +402,7 @@ function handleSelect(id: string, engine: GazeEngine) {
   const el = document.getElementById(id) as HTMLElement | null;
   const word = el?.dataset.word;
   if (!word) return;
+  clearAgentResponse();
   sessionEvents.push({ timestamp: Date.now(), type: 'word_select', value: word });
   composedText = (composedText.trimEnd() + ' ' + word + ' ').trimStart();
   updateDisplay();
@@ -413,7 +445,7 @@ async function startBoard(source: GazeSource, calibration?: CalibrationProfile):
   composedText = '';
 
   const engine = new GazeEngine(
-    { dwellMs: 2000, confidenceThreshold: 0.3, filterAlpha: 0.25 },
+    { dwellMs: 1500, confidenceThreshold: 0.25, filterAlpha: 0.25 },
     source,
   );
   if (calibration) engine.loadCalibrationProfile(calibration);
@@ -423,8 +455,13 @@ async function startBoard(source: GazeSource, calibration?: CalibrationProfile):
   buildBoard(engine);
 
   const cursor = document.getElementById('gaze-cursor')!;
+  const debugEl = document.getElementById('gaze-debug')!;
   cursor.style.display = 'block';
-  engine.onGaze(pt => moveCursor(pt.x, pt.y));
+  engine.onGaze(pt => {
+    moveCursor(pt.x, pt.y);
+    const raw = (mpSource as MediaPipeGazeSource | null)?.lastRaw;
+    if (raw) debugEl.textContent = `raw x:${raw.x.toFixed(3)} y:${raw.y.toFixed(3)}  →  screen x:${Math.round(pt.x)} y:${Math.round(pt.y)}`;
+  });
 
   // Track the last tile that was dwelled so we can reset its ring when gaze moves away
   let lastDwellId: string | null = null;
@@ -478,7 +515,8 @@ async function startBoard(source: GazeSource, calibration?: CalibrationProfile):
       const el = document.getElementById(id);
       if (!el) continue;
       const r = el.getBoundingClientRect();
-      engine.registerTarget({ id, rect: { x: r.left-20, y: r.top-20, width: r.width+40, height: r.height+40 }, label: id });
+      const pad = (id === CTRL_UNDO || id === CTRL_SEND) ? 100 : 20;
+      engine.registerTarget({ id, rect: { x: r.left-pad, y: r.top-pad, width: r.width+pad*2, height: r.height+pad*2 }, label: id });
     }
     for (const id of HEADER_BTN_IDS) {
       const el = document.getElementById(id);
@@ -489,12 +527,16 @@ async function startBoard(source: GazeSource, calibration?: CalibrationProfile):
   });
 
   await engine.start();
+  activeEngine = engine;
   return engine;
 }
 
 // ── Button wiring ─────────────────────────────────────────────────────────────
 
 let mpSource: MediaPipeGazeSource | null = null;
+let activeEngine: GazeEngine | null = null;
+
+wireKeyboard(() => activeEngine);
 
 function wireButtons(engine: GazeEngine, calibration: CalibrationProfile | undefined) {
   ['btn-back', 'btn-recalibrate', 'btn-bye'].forEach(btnId => {
@@ -505,6 +547,7 @@ function wireButtons(engine: GazeEngine, calibration: CalibrationProfile | undef
 
   document.getElementById('btn-back')!.addEventListener('click', () => {
     engine.stop();
+    activeEngine = null;
     mpSource?.shutdown();
     mpSource = null;
     document.getElementById('gaze-cursor')!.style.display = 'none';
@@ -566,6 +609,12 @@ function wireButtons(engine: GazeEngine, calibration: CalibrationProfile | undef
         body: JSON.stringify(payload),
       });
 
+      if (res.status === 400) {
+        const body = await res.json() as { error?: string };
+        loadingEl.classList.add('hidden');
+        contentEl.innerHTML = `<p style="text-align:center;color:var(--text-muted);padding:20px 0;">Insufficient information to generate a report.</p>`;
+        return;
+      }
       if (!res.ok) {
         const errText = await res.text();
         throw new Error(`Backend error ${res.status}: ${errText}`);
@@ -580,6 +629,24 @@ function wireButtons(engine: GazeEngine, calibration: CalibrationProfile | undef
     }
   });
 
+}
+
+// ── Keyboard shortcuts ────────────────────────────────────────────────────────
+// Space = SEND, Backspace/Delete = UNDO — reliable fallback when gaze can't reach bottom tiles.
+
+function wireKeyboard(getEngine: () => GazeEngine | null) {
+  window.addEventListener('keydown', (e) => {
+    const engine = getEngine();
+    if (!engine) return;
+    if (document.body.dataset.screen !== 'screen-board') return;
+    if (e.code === 'Space') {
+      e.preventDefault();
+      handleSelect(CTRL_SEND, engine);
+    } else if (e.code === 'Backspace' || e.code === 'Delete') {
+      e.preventDefault();
+      handleSelect(CTRL_UNDO, engine);
+    }
+  });
 }
 
 // ── Entry point ───────────────────────────────────────────────────────────────

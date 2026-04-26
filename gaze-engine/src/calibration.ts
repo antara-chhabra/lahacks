@@ -61,7 +61,7 @@ function idw(rawX: number, rawY: number, samples: CalibrationSample[]): { x: num
 
     if (d2 < 1e-12) return { x: s.screenX, y: s.screenY }; // exactly on a calibration point
 
-    const w = 1 / (d2 * d2); // 1/d⁴ — sharper locality than standard 1/d²
+    const w = 1 / d2; // 1/d² — global enough to extrapolate near screen edges
     wSum  += w;
     wxSum += w * s.screenX;
     wySum += w * s.screenY;
@@ -75,14 +75,36 @@ export function applyCalibration(
   rawY: number,
   profile: CalibrationProfile,
 ): { x: number; y: number } {
-  // Use IDW when samples are stored (built by buildCalibrationProfile).
-  // Fall back to the linear model for profiles created without samples (tests, manual profiles).
-  if (profile.samples && profile.samples.length >= 3) {
-    return idw(rawX, rawY, profile.samples);
+  if (!profile.samples || profile.samples.length < 3) {
+    return {
+      x: profile.scaleX * rawX + profile.offsetX,
+      y: profile.scaleY * rawY + profile.offsetY,
+    };
   }
-  return {
+
+  // Find distance to nearest calibration sample in raw-gaze space.
+  let minD2 = Infinity;
+  for (const s of profile.samples) {
+    const d2 = (rawX - s.rawGazeX) ** 2 + (rawY - s.rawGazeY) ** 2;
+    if (d2 < minD2) minD2 = d2;
+  }
+
+  const idwPt    = idw(rawX, rawY, profile.samples);
+  const linearPt = {
     x: profile.scaleX * rawX + profile.offsetX,
     y: profile.scaleY * rawY + profile.offsetY,
+  };
+
+  // When raw gaze is close to a calibration point, trust IDW (it's exact there).
+  // When far from all points (edge / extrapolation zone), blend toward the linear
+  // fit which extrapolates naturally beyond the calibration hull.
+  const BLEND_NEAR = 0.0004; // d² threshold below which we use pure IDW
+  const BLEND_FAR  = 0.004;  // d² above which we use pure linear
+  const t = Math.min(1, Math.max(0, (minD2 - BLEND_NEAR) / (BLEND_FAR - BLEND_NEAR)));
+
+  return {
+    x: idwPt.x * (1 - t) + linearPt.x * t,
+    y: idwPt.y * (1 - t) + linearPt.y * t,
   };
 }
 

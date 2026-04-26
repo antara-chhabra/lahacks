@@ -105,32 +105,43 @@ html, body {
 
 #calib-surface { position: fixed; inset: 0; pointer-events: none; z-index: 600; }
 
+#btn-skip-calib {
+  position: fixed;
+  top: 16px;
+  right: 20px;
+  margin-top: 0;
+  z-index: 700;
+}
+
 .calib-dot {
   position: absolute;
-  width: 36px; height: 36px;
+  width: 44px; height: 44px;
   border-radius: 50%;
   transform: translate(-50%, -50%);
   cursor: pointer;
   pointer-events: auto;
-  transition: transform 0.25s, background 0.25s, box-shadow 0.25s;
-  background: rgba(255,255,255,0.2);
-  border: 2px solid rgba(255,255,255,0.4);
+  transition: background 0.25s, box-shadow 0.25s, opacity 0.25s;
+  background: rgba(255,255,255,0.25);
+  border: 2px solid rgba(255,255,255,0.5);
+  opacity: 0.4;
 }
 .calib-dot.active {
   background: #4ade80; border-color: #4ade80;
   box-shadow: 0 0 20px rgba(74,222,128,0.7);
   animation: pulse 1s infinite;
+  opacity: 1;
 }
 .calib-dot.capturing {
   background: #facc15; border-color: #facc15;
   box-shadow: 0 0 28px rgba(250,204,21,0.8);
   animation: none;
+  opacity: 1;
 }
 .calib-dot.done {
-  background: rgba(255,255,255,0.1);
-  border-color: rgba(255,255,255,0.12);
-  transform: translate(-50%,-50%) scale(0.55);
+  background: rgba(255,255,255,0.08);
+  border-color: rgba(255,255,255,0.1);
   pointer-events: none;
+  opacity: 0.2;
 }
 @keyframes pulse {
   0%, 100% { box-shadow: 0 0 16px rgba(74,222,128,0.6); }
@@ -198,16 +209,20 @@ html, body {
   flex-shrink: 0;
 }
 
-/* ── Word grid — 2 columns × 3 rows ──────────────────────────────────────── */
+/* ── Word grid — UNDO | 2×2 words | SEND ─────────────────────────────────── */
 
 #word-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  grid-template-rows: 1fr 1fr 1fr;
+  grid-template-columns: 0.65fr 1fr 1fr 0.65fr;
+  grid-template-rows: 1fr 1fr;
   gap: 14px;
   flex: 1;
   min-height: 0;
 }
+
+/* UNDO and SEND span both rows */
+#ctrl-UNDO { grid-column: 1; grid-row: 1 / span 2; }
+#ctrl-SEND { grid-column: 4; grid-row: 1 / span 2; }
 
 /* ── Base tile ────────────────────────────────────────────────────────────── */
 
@@ -308,6 +323,23 @@ html, body {
   transform-origin: 50% 50%;
   transform: rotate(-90deg);
 }
+
+/* ── Gaze debug overlay ──────────────────────────────────────────────────── */
+
+#gaze-debug {
+  position: fixed;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 0.7rem;
+  font-family: monospace;
+  color: rgba(255,255,255,0.4);
+  pointer-events: none;
+  z-index: 9998;
+  display: none;
+}
+
+body[data-screen="screen-board"] #gaze-debug { display: block; }
 
 /* ── Gaze cursor ──────────────────────────────────────────────────────────── */
 
@@ -441,6 +473,62 @@ html, body {
   font-size: 0.88rem;
   text-align: center;
   padding: 16px 0;
+}
+
+/* ── Keyboard hint strip ─────────────────────────────────────────────────── */
+
+.key-hints {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+kbd {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 0.7rem;
+  font-family: inherit;
+  color: var(--text);
+}
+
+/* ── Agent response strip ────────────────────────────────────────────────── */
+
+.agent-response {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+  border: 1px solid rgba(124,111,255,0.25);
+  border-radius: 12px;
+  padding: 10px 18px;
+  flex-shrink: 0;
+  animation: fade-in 0.3s ease;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.agent-label {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+#agent-response-text {
+  font-size: 0.95rem;
+  color: var(--text);
+  line-height: 1.4;
 }
 
 /* ── Header button dwell highlight ───────────────────────────────────────── */

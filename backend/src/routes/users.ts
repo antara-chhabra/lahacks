@@ -10,9 +10,11 @@ const router = Router();
 router.get('/:id/profile', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const db = getDB();
-    const user = await db.collection('users').findOne({
-      _id: new ObjectId(req.params['id'] as string)
-    });
+    const rawId = req.params['id'] as string;
+    const filter = ObjectId.isValid(rawId) && rawId.length === 24
+      ? { _id: new ObjectId(rawId) }
+      : { userId: rawId };
+    const user = await db.collection('users').findOne(filter);
     if (!user) { res.status(404).json({ error: 'User not found' }); return; }
     res.json(user);
   } catch (err) { next(err); }
