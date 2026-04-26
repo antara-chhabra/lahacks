@@ -13,7 +13,7 @@ router.get('/:userId', async (req, res, next) => {
   try {
     const db = getDB();
     const phrases = await db.collection('phrases').find({
-      userId: new ObjectId(req.params.userId)
+      userId: req.params.userId,
     }).toArray();
     res.json(phrases);
   } catch (err) {
@@ -28,10 +28,10 @@ router.post('/', validate(PhraseSchema), async (req, res, next) => {
     const embedding = await embed(req.body.text);
     const result = await db.collection('phrases').insertOne({
       ...req.body,
-      userId: new ObjectId(req.body.userId),
+      userId: String(req.body.userId),
       embedding,
       usageCount: 0,
-      createdAt: new Date()
+      createdAt: new Date(),
     });
     res.status(201).json({ _id: result.insertedId, ...req.body });
   } catch (err) {

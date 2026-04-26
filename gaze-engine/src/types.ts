@@ -43,6 +43,7 @@ export interface EngineConfig {
   confidenceThreshold?: number; // drop gaze frames below this (default 0.3)
   filterAlpha?: number;         // EMA weight 0–1; higher = less smoothing (default 0.4)
   calibrationGridSize?: number; // side of calibration grid, so 3 → 3×3=9 points (default 3)
+  xGain?: number;               // horizontal sensitivity multiplier after calibration (default 1.0; <1 = less sensitive)
 }
 
 export type SelectionCallback = (targetId: string, target: Target) => void;

@@ -14,9 +14,9 @@ router.post('/', validate(MessageHistorySchema), async (req, res, next) => {
     const db = getDB();
     const result = await db.collection('message_history').insertOne({
       ...req.body,
-      userId: new ObjectId(req.body.userId),
+      userId: String(req.body.userId),
       embedding: [],
-      createdAt: new Date()
+      createdAt: new Date(),
     });
 
     // Generate embedding off the write path so response is fast
@@ -39,7 +39,7 @@ router.get('/:userId', async (req, res, next) => {
   try {
     const db = getDB();
     const history = await db.collection('message_history').find({
-      userId: new ObjectId(req.params.userId)
+      userId: req.params.userId,
     }).sort({ createdAt: -1 }).limit(50).toArray();
     res.json(history);
   } catch (err) {

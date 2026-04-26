@@ -221,8 +221,8 @@ html, body {
 }
 
 /* UNDO and SEND span both rows */
-#ctrl-UNDO { grid-column: 1; grid-row: 1 / span 2; }
-#ctrl-SEND { grid-column: 4; grid-row: 1 / span 2; }
+#ctrl-SEND { grid-column: 1; grid-row: 1 / span 2; }
+#ctrl-UNDO { grid-column: 4; grid-row: 1 / span 2; }
 
 /* ── Base tile ────────────────────────────────────────────────────────────── */
 

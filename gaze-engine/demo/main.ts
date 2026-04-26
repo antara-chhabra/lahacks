@@ -1,5 +1,5 @@
 import { GazeEngine, buildCalibrationProfile } from '@catalyst/gaze-engine';
-import type { GazeSource, GazeCallback, CalibrationSample, CalibrationProfile } from '@catalyst/gaze-engine';
+import type { GazeSource, CalibrationSample, CalibrationProfile } from '@catalyst/gaze-engine';
 import { MediaPipeGazeSource } from './mediapipe-source';
 import { SessionRecorder } from '../../claudinary-video/src/recorder';
 import { uploadToCloudinary } from '../../claudinary-video/src/uploader';
@@ -279,6 +279,46 @@ function setWordTileLabels(words: string[], engine: GazeEngine, weights?: number
   });
 }
 
+function registerAllTargets(engine: GazeEngine) {
+  const W = window.innerWidth;
+  const H = window.innerHeight;
+
+  for (const id of ALL_TILE_IDS) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    const r = el.getBoundingClientRect();
+
+    let x      = r.left - 20;
+    let y      = r.top  - 20;
+    let width  = r.width  + 40;
+    let height = r.height + 40;
+
+    // SEND is now on the left — extend hit rect to the left screen edge
+    if (id === CTRL_SEND) {
+      x      = 0;
+      y      = 0;
+      width  = r.right + 20;
+      height = H;
+    }
+    // UNDO is now on the right — extend hit rect to the right screen edge
+    if (id === CTRL_UNDO) {
+      x      = r.left - 20;
+      y      = 0;
+      width  = W - x;
+      height = H;
+    }
+
+    engine.registerTarget({ id, rect: { x, y, width, height }, label: id });
+  }
+
+  for (const id of HEADER_BTN_IDS) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    const r = el.getBoundingClientRect();
+    engine.registerTarget({ id, rect: { x: r.left - 24, y: r.top - 24, width: r.width + 48, height: r.height + 48 }, label: id });
+  }
+}
+
 function buildBoard(engine: GazeEngine) {
   const grid = document.getElementById('word-grid')!;
   grid.innerHTML = '';
@@ -307,23 +347,7 @@ function buildBoard(engine: GazeEngine) {
   grid.appendChild(send);
 
   requestAnimationFrame(() => {
-    for (const id of ALL_TILE_IDS) {
-      const r = document.getElementById(id)!.getBoundingClientRect();
-      // SEND and UNDO get a much larger hit area — they sit at screen edges and are hard to reach
-      const pad = (id === CTRL_UNDO || id === CTRL_SEND) ? 100 : 20;
-      engine.registerTarget({
-        id,
-        rect: { x: r.left - pad, y: r.top - pad, width: r.width + pad * 2, height: r.height + pad * 2 },
-        label: id,
-      });
-    }
-    // Header buttons get a larger hit area so they're reachable by gaze
-    for (const id of HEADER_BTN_IDS) {
-      const el = document.getElementById(id);
-      if (!el) continue;
-      const r = el.getBoundingClientRect();
-      engine.registerTarget({ id, rect: { x: r.left - 24, y: r.top - 24, width: r.width + 48, height: r.height + 48 }, label: id });
-    }
+    registerAllTargets(engine);
     refreshWordTiles(engine);
   });
 }
@@ -338,7 +362,7 @@ async function refreshWordTiles(engine: GazeEngine) {
     const res = await fetch(`${AGENT_URL}/predict`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ context: composedText.trim() || '' }),
+      body: JSON.stringify({ context: composedText.trim() || '', user_id: USER_ID }),
     });
     if (res.ok) {
       const data = await res.json() as { words?: string[]; weights?: number[] };
@@ -371,6 +395,21 @@ function handleSelect(id: string, engine: GazeEngine) {
     sessionMessages.push(text);
     sessionEvents.push({ timestamp: Date.now(), type: 'send', value: text });
     showAgentResponse('…');
+
+    // Persist to MongoDB — fire-and-forget, never blocks the UI
+    const historyPayload = { userId: USER_ID, message: text, sessionId: SESSION_ID };
+    fetch(`${BACKEND_URL}/history`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(historyPayload),
+    }).catch(() => {});
+    // Also save as a reusable phrase so vector search can surface it next session
+    fetch(`${BACKEND_URL}/phrases`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: USER_ID, text, category: 'sent' }),
+    }).catch(() => {});
+
     fetch(`${AGENT_URL}/intent`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -445,7 +484,7 @@ async function startBoard(source: GazeSource, calibration?: CalibrationProfile):
   composedText = '';
 
   const engine = new GazeEngine(
-    { dwellMs: 1500, confidenceThreshold: 0.25, filterAlpha: 0.25 },
+    { dwellMs: 1500, confidenceThreshold: 0.25, filterAlpha: 0.15, xGain: 0.75 },
     source,
   );
   if (calibration) engine.loadCalibrationProfile(calibration);
@@ -511,19 +550,7 @@ async function startBoard(source: GazeSource, calibration?: CalibrationProfile):
 
   window.addEventListener('resize', () => {
     engine.clearTargets();
-    for (const id of ALL_TILE_IDS) {
-      const el = document.getElementById(id);
-      if (!el) continue;
-      const r = el.getBoundingClientRect();
-      const pad = (id === CTRL_UNDO || id === CTRL_SEND) ? 100 : 20;
-      engine.registerTarget({ id, rect: { x: r.left-pad, y: r.top-pad, width: r.width+pad*2, height: r.height+pad*2 }, label: id });
-    }
-    for (const id of HEADER_BTN_IDS) {
-      const el = document.getElementById(id);
-      if (!el) continue;
-      const r = el.getBoundingClientRect();
-      engine.registerTarget({ id, rect: { x: r.left-24, y: r.top-24, width: r.width+48, height: r.height+48 }, label: id });
-    }
+    registerAllTargets(engine);
   });
 
   await engine.start();
@@ -610,7 +637,7 @@ function wireButtons(engine: GazeEngine, calibration: CalibrationProfile | undef
       });
 
       if (res.status === 400) {
-        const body = await res.json() as { error?: string };
+        await res.json();
         loadingEl.classList.add('hidden');
         contentEl.innerHTML = `<p style="text-align:center;color:var(--text-muted);padding:20px 0;">Insufficient information to generate a report.</p>`;
         return;

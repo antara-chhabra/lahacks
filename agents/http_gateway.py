@@ -15,6 +15,7 @@ import json
 import os
 import sys
 import time
+import urllib.request
 from contextlib import asynccontextmanager
 from datetime import datetime
 from uuid import uuid4
@@ -49,12 +50,30 @@ ASI1_API_KEY = os.getenv("ASI1_API_KEY", "")
 asi1 = AsyncOpenAI(api_key=ASI1_API_KEY, base_url="https://api.asi1.ai/v1")
 MODEL = "asi1-mini"
 
+BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:3001")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 gemini = AsyncOpenAI(
     api_key=GEMINI_API_KEY,
     base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
 ) if GEMINI_API_KEY else None
 GEMINI_MODEL = "gemini-2.5-flash"
+
+async def fetch_user_history(user_id: str, limit: int = 10) -> list[str]:
+    """Fetch the user's most recent sent messages from the backend (MongoDB)."""
+    def _get() -> list[str]:
+        url = f"{BACKEND_URL}/history/{user_id}"
+        try:
+            with urllib.request.urlopen(url, timeout=1) as r:
+                data = json.loads(r.read())
+            # history route returns newest-first; extract message text
+            return [item.get("message", "") for item in data[:limit] if item.get("message")]
+        except Exception:
+            return []
+    try:
+        return await asyncio.wait_for(asyncio.to_thread(_get), timeout=1.5)
+    except Exception:
+        return []
+
 
 PREDICT_SYSTEM = """\
 You are an AAC (Augmentative and Alternative Communication) next-word predictor for people with \
@@ -318,8 +337,9 @@ async def handle_intent(req: GazeRequest):
 
 
 class PredictRequest(BaseModel):
-    context: str = ""  # current composed text, e.g. "I WANT"
-    prefix: str = ""   # optional single-letter filter
+    context: str = ""       # current composed text, e.g. "I WANT"
+    prefix: str = ""        # optional single-letter filter
+    user_id: str = "demo-1"
 
 
 @app.post("/predict", response_model=dict)
@@ -327,18 +347,31 @@ async def predict_words(req: PredictRequest):
     """
     Return 4 next-word suggestions ordered by probability (most → least likely),
     each with a relative weight so the frontend can visualise likelihood.
+    Fetches user's MongoDB message history to personalise suggestions.
     Uses Gemini (primary) → ASI1 (fallback).
     """
     context = req.context.strip().upper()
+
+    # Fetch user history from MongoDB (non-blocking, 1.5s timeout)
+    history = await fetch_user_history(req.user_id)
+    history_block = ""
+    if history:
+        history_block = (
+            "\n\nThis patient's recent communication history (newest first):\n"
+            + "\n".join(f'  - "{m}"' for m in history)
+            + "\nLet this history inform word choice — weight familiar patterns higher."
+        )
+
     if req.prefix:
         user_prompt = (
             f'Current phrase: "{context or "(none)"}".\n'
             f"Filter: all 4 words must start with the letter '{req.prefix.upper()}'."
+            + history_block
         )
     elif context:
-        user_prompt = f'Current phrase: "{context}".\nSuggest the next 4 words/phrases.'
+        user_prompt = f'Current phrase: "{context}".\nSuggest the next 4 words/phrases.' + history_block
     else:
-        user_prompt = "The patient has not typed anything yet. Suggest 4 good sentence starters."
+        user_prompt = "The patient has not typed anything yet. Suggest 4 good sentence starters." + history_block
 
     candidates = []
     if gemini:

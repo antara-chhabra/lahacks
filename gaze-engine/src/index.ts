@@ -28,6 +28,26 @@ export type { GazeSource } from './tracker.js';
 export { MockGazeSource, WebGazerSource } from './tracker.js';
 export { buildCalibrationProfile, applyCalibration, generateCalibrationGrid } from './calibration.js';
 
+/**
+ * Compress horizontal gaze only in the centre of the screen.
+ * The outer 20% on each side passes through untouched so SEND/UNDO remain reachable.
+ * A sine bell blends smoothly between compressed centre and uncompressed edges.
+ */
+function applyZoneGain(x: number, gain: number): number {
+  const w = typeof window !== 'undefined' ? window.innerWidth : 1920;
+  const norm = x / w;                      // 0..1 across screen
+  const edgeW = 0.20;                       // outer 20% each side = no compression
+  if (norm <= edgeW || norm >= 1 - edgeW) return x;
+
+  // t = 0 at edge boundaries, peaks at 1 in the exact centre
+  const mid = (norm - edgeW) / (1 - 2 * edgeW); // 0..1 across centre zone
+  const t = Math.sin(mid * Math.PI);             // sine bell
+
+  const cx = w / 2;
+  const compressed = cx + (x - cx) * gain;
+  return x + (compressed - x) * t;
+}
+
 export class GazeEngine {
   private readonly cfg: Required<EngineConfig>;
   private readonly filter: GazeFilter;
@@ -47,6 +67,7 @@ export class GazeEngine {
       confidenceThreshold: config.confidenceThreshold ?? 0.3,
       filterAlpha: config.filterAlpha ?? 0.4,
       calibrationGridSize: config.calibrationGridSize ?? 3,
+      xGain: config.xGain ?? 1.0,
     };
 
     this.filter = new GazeFilter(this.cfg.filterAlpha, this.cfg.confidenceThreshold);
@@ -111,7 +132,10 @@ export class GazeEngine {
       // 1. Apply calibration offset/scale if present
       let point = raw;
       if (this.calibration) {
-        const { x, y } = applyCalibration(raw.x, raw.y, this.calibration);
+        let { x, y } = applyCalibration(raw.x, raw.y, this.calibration);
+        if (this.cfg.xGain !== 1.0) {
+          x = applyZoneGain(x, this.cfg.xGain);
+        }
         point = { ...raw, x, y };
       }
 
