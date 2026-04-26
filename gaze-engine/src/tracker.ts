@@ -29,7 +29,14 @@ export class WebGazerSource implements GazeSource {
 
     this.wg = wg;
 
+    // Don't carry over stale training data from previous sessions
+    if (wg.params) wg.params.saveDataAcrossSessions = false;
+
     await wg
+      .showPredictionPoints(false)
+      .showFaceOverlay(false)
+      .showFaceFeedbackBox(false)
+      .showVideo(false)
       .setGazeListener(
         (data: { x: number; y: number } | null, elapsedTime: number) => {
           if (!data) return;
@@ -43,10 +50,6 @@ export class WebGazerSource implements GazeSource {
         },
       )
       .begin();
-
-    wg.showPredictionPoints(false);
-    wg.showFaceOverlay(false);
-    wg.showFaceFeedbackBox(false);
   }
 
   stop(): void {

@@ -17,12 +17,12 @@ router.post('/end', async (req, res, next) => {
 
     const summary = await analyzeSession(data);
 
-    const db = getDB();
-    await db.collection('session_summaries').insertOne({
+    // Fire-and-forget — don't let DB failures block the summary response
+    getDB().collection('session_summaries').insertOne({
       ...data,
       summary,
       createdAt: new Date(),
-    });
+    }).catch(err => console.error('Failed to persist session summary:', err));
 
     res.json(summary);
   } catch (err) {

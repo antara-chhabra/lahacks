@@ -157,13 +157,19 @@ function runWebcamCalibration(): Promise<void> {
     dots[0].classList.add('active');
     progressEl.textContent = 'Click the dot while looking at it';
 
+    const finishCalibration = () => {
+      // Freeze WebGazer's model — stop training from subsequent mouse events
+      (globalThis as any).webgazer?.removeMouseEventListeners?.();
+      surface.innerHTML = '';
+      resolve();
+    };
+
     const advance = () => {
       dots[current].classList.remove('active');
       dots[current].classList.add('done');
       current++;
       if (current >= pts.length) {
-        surface.innerHTML = '';
-        resolve();
+        finishCalibration();
         return;
       }
       nEl.textContent = String(current + 1);
@@ -173,8 +179,7 @@ function runWebcamCalibration(): Promise<void> {
     dots.forEach(dot => dot.addEventListener('click', advance, { once: true }));
 
     document.getElementById('btn-skip-calib')!.addEventListener('click', () => {
-      surface.innerHTML = '';
-      resolve();
+      finishCalibration();
     }, { once: true });
   });
 }
@@ -575,14 +580,16 @@ async function generateSummary(state: ModeState): Promise<SessionSummary | null>
   let videoUrl = '';
   let videoPublicId = '';
   try {
-    const duration = Math.round((Date.now() - recorder.startTime) / 1000);
-    const blob = await recorder.stop();
-    try {
-      const upload = await uploadToCloudinary(blob, CLOUDINARY_CLOUD, CLOUDINARY_PRESET);
-      videoUrl = upload.secureUrl;
-      videoPublicId = upload.publicId;
-    } catch {
-      // text-only summary
+    const duration = recorder.isRecording ? Math.round((Date.now() - recorder.startTime) / 1000) : 0;
+    const blob = recorder.isRecording ? await recorder.stop() : null;
+    if (blob && blob.size > 0) {
+      try {
+        const upload = await uploadToCloudinary(blob, CLOUDINARY_CLOUD, CLOUDINARY_PRESET);
+        videoUrl = upload.secureUrl;
+        videoPublicId = upload.publicId;
+      } catch {
+        // text-only summary
+      }
     }
 
     const payload: SessionData = {
@@ -821,6 +828,7 @@ function wireButtons(engine: GazeEngine) {
         }
       })
       .catch(err => {
+        console.error('[summary]', err);
         if (modal.classList.contains('hidden')) return;
         loadingEl.classList.add('hidden');
         contentEl.innerHTML = `<p class="summary-error">Could not generate summary: ${String(err)}</p>`;

@@ -31,7 +31,7 @@ const CLOUD_NAME = process.env.CLOUDINARY_CLOUD_NAME ?? 'dsddkg2x6';
 const FRAME_COUNT = 8;
 
 async function fetchFrameAsBase64(publicId: string, offsetSec: number): Promise<string | null> {
-  const url = `https://res.cloudinary.com/${CLOUD_NAME}/video/upload/so_${offsetSec},f_jpg/${publicId}`;
+  const url = `https://res.cloudinary.com/${CLOUD_NAME}/video/upload/so_${offsetSec},f_jpg/${publicId}.jpg`;
   try {
     const res = await fetch(url);
     if (!res.ok) return null;
@@ -91,8 +91,8 @@ Please analyze this session and return the JSON summary.`;
   }));
 
   const model = genai.getGenerativeModel(
-    { model: 'gemini-1.5-flash', systemInstruction: systemPrompt },
-    { apiVersion: 'v1' },
+    { model: 'gemini-2.5-flash', systemInstruction: systemPrompt },
+    { apiVersion: 'v1beta' },
   );
   const result = await model.generateContent([...imageParts, textPart]);
   const raw = result.response.text() ?? '{}';
