@@ -1,13 +1,15 @@
-# Catalyst for Care
+# EyeText — Gaze-Powered AAC
 
-An AI-powered AAC (Augmentative and Alternative Communication) system for non-verbal patients. A patient dwells their gaze on a tile; the system speaks a personalized, context-aware response and — if urgent — texts their caregivers.
+An AI-powered AAC (Augmentative and Alternative Communication) system for non-verbal patients, people with disabilities, and elderly users. A patient dwells their gaze on a tile; the system speaks a personalized, context-aware response and — if urgent — notifies their caregivers.
+
+> **Tagline:** Your eyes are the new keyboard.
 
 ## Sponsor tracks
 
 | Track | Component |
 |-------|-----------|
 | Fetch.ai Agentverse | 3-agent pipeline (intent → memory → router) |
-| Cloudinary | Tile icon hosting + accessibility theme transforms |
+| Cloudinary | Tile icon hosting + session video upload |
 | MongoDB Atlas | Vector search for personalized phrase prediction |
 | ElevenLabs | Voice synthesis in the Router Agent |
 
@@ -26,21 +28,23 @@ Webcam
 
 ## Repos / folders
 
-| Folder | Owner | What it does |
-|--------|-------|-------------|
-| [shared/](shared/README.md) | all | Type contracts and API spec — read before coding |
-| [gaze-engine/](gaze-engine/README.md) | A | Webcam → tile-selection events (TypeScript) |
-| [agents/](agents/README.md) | B | Fetch.ai uAgent pipeline + HTTP gateway |
-| [cloudinary-assets/](cloudinary-assets/README.md) | C | Icon upload, theme presets, tile manifest |
-| [backend/](backend/README.md) | D | REST API + MongoDB Atlas Vector Search |
+| Folder | What it does |
+|--------|-------------|
+| [gaze-engine/](gaze-engine/README.md) | Webcam → tile-selection events (TypeScript, MediaPipe) |
+| [agents/](agents/README.md) | Fetch.ai uAgent pipeline + HTTP gateway |
+| [backend/](backend/README.md) | REST API + MongoDB Atlas Vector Search + Gemini session analysis |
+| [shared/](shared/README.md) | Type contracts and API spec |
+| [cloudinary-assets/](cloudinary-assets/README.md) | Icon upload, theme presets, tile manifest |
 
-## Running the app (newversion9pm branch)
+---
 
-This is the current working setup. Run all three services in separate terminals.
+## Running the app (`newversion3am` branch)
+
+Run all three services in separate terminals.
 
 ### Prerequisites
 
-Create the following `.env` files (values are in team 1Password / Notion):
+Create the following `.env` files (values in team 1Password / Notion):
 
 **`backend/.env`**
 ```
@@ -90,39 +94,45 @@ npm install
 npm run dev
 ```
 
-Open **http://localhost:5173** — click "Start with Webcam", complete the 8-point calibration, then look at tiles to compose a message. Dwell on **SEND** to fire the agent pipeline (response appears in the banner above the tiles). Dwell on **End Session** for a Gemini-generated session summary.
+Open **http://localhost:5173**, click "Start with Webcam", complete the 7-point calibration, select a mode (Talk or Help), then communicate by looking.
 
 ---
 
-## Quick start (integration day)
+## User flow
 
-```bash
-# 1. backend
-cd backend && cp .env.example .env  # fill in MONGODB_URI, OPENAI_API_KEY
-npm install && npm run dev          # :3001
-
-# 2. agents
-cd agents && cp .env.example .env   # fill in LLM_API_KEY, ELEVENLABS_API_KEY
-pip install -r requirements.txt
-python bureau.py                    # starts all 3 agents + gateway on :8000
-
-# 3. seed demo data
-cd backend && npm run seed
-
-# 4. smoke test
-curl -X POST http://localhost:8000/intent \
-  -H "Content-Type: application/json" \
-  -d '{"dwell_target_id":"WATER","dwell_duration_ms":1350,"session_id":"s1","user_id":"demo-1","points":[]}'
 ```
+Landing → Calibration (7 dots) → Mode Select → Board
+```
+
+### Talk mode
+Build sentences word by word using gaze. Words update automatically using AI-powered next-word prediction. Dwell on **SEND** to fire the agent pipeline — a spoken + text response appears. Keyboard shortcuts: `Space` = Send, `Backspace` = Undo.
+
+### Help mode
+5 instant-speak tiles (🆘 Help me · 😣 In Pain · 💧 Water · 🍽️ Food · 🚽 Bathroom). Look at a tile and it speaks immediately — no SEND needed. Toggle between Talk and Help at any time using the mode switch in the board header.
+
+### Session Summary
+Press **📋 Summary** at any time to generate a Gemini-powered session analysis (emotional arc, clinical notes, key moments). The engine keeps running — close the modal and continue communicating. Each mode keeps its own summary.
+
+---
+
+## Gaze engine details
+
+- **Tracking:** MediaPipe FaceLandmarker — iris position relative to eye width
+- **Calibration:** 7-point grid, IDW + linear blend for edge extrapolation
+- **Smoothing:** Two-stage filter — EMA (`filterAlpha: 0.08`) removes tremor; fixation zone (14px dead-zone) locks cursor when eye is still
+- **Dwell:** 1500ms of stable gaze triggers selection with circular progress ring feedback
+- **Hit areas:** SEND/UNDO extend to full screen edges; toggle buttons have 52px extra padding each side
+
+---
 
 ## Branch conventions
 
 ```
-main          ← stable, judges-facing
-task1-gaze    ← Owner A
-task2-agents  ← Owner B
-task3-cdn     ← Owner C
-task4-backend ← Owner D
+main              ← stable, judges-facing
+newversion9pm     ← previous working version
+newversion3am     ← current (EyeText rebrand, Talk/Help modes, gaze improvements)
+task1-gaze        ← Owner A
+task2-agents      ← Owner B
+task3-cdn         ← Owner C
+task4-backend     ← Owner D
 ```
-
-Merge to `main` twice: after the day-1 stub commit, and after integration.

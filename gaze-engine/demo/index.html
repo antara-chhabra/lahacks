@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Catalyst for Care — AAC</title>
+  <title>EyeText — AAC</title>
   <link rel="stylesheet" href="./style.css" />
 </head>
 <body>
@@ -12,13 +12,15 @@
     <!-- ── Landing ─────────────────────────────────────────────────── -->
     <section id="screen-landing" class="screen active">
       <div class="landing-content">
-        <div class="logo">👁 Catalyst for Care</div>
-        <h1>Gaze-Powered AAC</h1>
-        <p>Look at a word tile for 1.2 seconds to select it.<br>Words update automatically to suggest what comes next.</p>
+        <div class="eyetext-hero">
+          <span class="hero-eye">EYE</span>
+          <span class="hero-text">TEXT</span>
+        </div>
+        <p class="landing-tagline">Your eyes are the new keyboard.</p>
         <button class="mode-card" id="btn-webcam">
           <div class="mode-icon">📷</div>
           <div class="mode-title">Start with Webcam</div>
-          <div class="mode-desc">Calibrate once with 9 dots, then communicate by looking</div>
+          <div class="mode-desc">Calibrate once, communicate forever.</div>
         </button>
       </div>
     </section>
@@ -28,11 +30,51 @@
       <div class="calib-header">
         <h2>Calibration</h2>
         <p id="calib-instruction">Loading…</p>
-        <div class="calib-counter">Point <span id="calib-n">1</span> / 6</div>
+        <div class="calib-counter">Point <span id="calib-n">1</span> / 7</div>
         <div id="calib-progress" class="calib-progress">Click the dot, then hold still</div>
       </div>
       <div id="calib-surface"></div>
       <button class="ghost-btn" id="btn-skip-calib">Skip calibration →</button>
+    </section>
+
+    <!-- ── Mode Selection ─────────────────────────────────────────── -->
+    <section id="screen-mode-select" class="screen">
+      <div class="mode-select-content">
+        <div class="mode-select-logo">👁 EyeText</div>
+        <h2>How would you like to communicate?</h2>
+        <p>Look at a card for 1.5 seconds to select.</p>
+        <div class="mode-select-cards">
+
+          <div class="mode-select-card" id="mode-card-talk">
+            <svg class="progress-ring" viewBox="0 0 100 100" aria-hidden="true">
+              <circle class="ring-track" cx="50" cy="50" r="44"/>
+              <circle class="ring-fill" cx="50" cy="50" r="44"
+                stroke-dasharray="276.46"
+                stroke-dashoffset="276.46"/>
+            </svg>
+            <div class="card-body">
+              <div class="mode-select-icon">💬</div>
+              <div class="mode-select-title">Talk</div>
+              <div class="mode-select-desc">Pick words, build sentences. Pick sentences, build connections.</div>
+            </div>
+          </div>
+
+          <div class="mode-select-card" id="mode-card-help">
+            <svg class="progress-ring" viewBox="0 0 100 100" aria-hidden="true">
+              <circle class="ring-track" cx="50" cy="50" r="44"/>
+              <circle class="ring-fill" cx="50" cy="50" r="44"
+                stroke-dasharray="276.46"
+                stroke-dashoffset="276.46"/>
+            </svg>
+            <div class="card-body">
+              <div class="mode-select-icon">🆘</div>
+              <div class="mode-select-title">Help</div>
+              <div class="mode-select-desc">Less eye-talking, more doing.</div>
+            </div>
+          </div>
+
+        </div>
+      </div>
     </section>
 
     <!-- ── AAC Board ──────────────────────────────────────────────── -->
@@ -42,10 +84,19 @@
         <div id="text-display">
           <span id="text-content" class="placeholder">Look at a word to begin…</span>
         </div>
+        <div class="mode-toggle">
+          <button class="toggle-btn active" id="btn-toggle-talk">
+            💬 Talk
+            <span class="toggle-dwell-bar"></span>
+          </button>
+          <button class="toggle-btn" id="btn-toggle-help">
+            🆘 Help
+            <span class="toggle-dwell-bar"></span>
+          </button>
+        </div>
         <button class="ghost-btn" id="btn-recalibrate">Recalibrate</button>
-        <div id="mode-badge">👁 Webcam</div>
         <div class="key-hints"><kbd>Space</kbd> Send &nbsp; <kbd>⌫</kbd> Undo</div>
-        <button class="ghost-btn bye-btn" id="btn-bye">👋 End Session</button>
+        <button class="ghost-btn bye-btn" id="btn-bye">📋 Summary</button>
       </header>
 
       <!-- Agent response strip — hidden until agent replies -->
@@ -54,10 +105,8 @@
         <span id="agent-response-text"></span>
       </div>
 
-      <!-- 4 word tiles + 2 controls in a 2×3 grid -->
-      <main id="word-grid">
-        <!-- Injected by JS -->
-      </main>
+      <!-- Tiles injected by JS -->
+      <main id="word-grid"></main>
     </section>
 
   </div>
@@ -65,7 +114,7 @@
   <div id="gaze-cursor"></div>
   <div id="gaze-debug"></div>
 
-  <!-- Session summary modal — shown after End Session -->
+  <!-- Session summary modal -->
   <div id="summary-modal" class="modal-overlay hidden">
     <div class="modal-card">
       <h2>Session Summary</h2>
@@ -74,7 +123,7 @@
         <p>Analyzing session… this may take a moment.</p>
       </div>
       <div id="summary-content"></div>
-      <button class="ghost-btn" id="btn-close-summary" style="margin-top: 20px; align-self: center;">Close</button>
+      <button class="ghost-btn" id="btn-close-summary" style="margin-top: 20px; align-self: center;">Close & Continue</button>
     </div>
   </div>
 

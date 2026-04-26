@@ -5,22 +5,37 @@ import { SessionRecorder } from '../../claudinary-video/src/recorder';
 import { uploadToCloudinary } from '../../claudinary-video/src/uploader';
 import type { SessionEvent, SessionData, SessionSummary } from '../../claudinary-video/src/types';
 
-// ── Session state ─────────────────────────────────────────────────────────────
-
-const recorder = new SessionRecorder();
-const sessionEvents: SessionEvent[] = [];
-const sessionMessages: string[] = [];
-const SESSION_ID = `sess-${Date.now()}`;
-const USER_ID = 'demo-1';
+// ── Constants ─────────────────────────────────────────────────────────────────
 
 const CLOUDINARY_CLOUD = 'dsddkg2x6';
 const CLOUDINARY_PRESET = 'Lahacks';
 const BACKEND_URL = 'http://localhost:3001';
 const AGENT_URL = 'http://localhost:8000';
+const USER_ID = 'demo-1';
+const SESSION_ID = `sess-${Date.now()}`;
+
+// ── Per-mode state ────────────────────────────────────────────────────────────
+
+type ModeState = {
+  events: SessionEvent[];
+  messages: string[];
+  summaryPromise: Promise<SessionSummary | null> | null;
+};
+
+const talkState: ModeState = { events: [], messages: [], summaryPromise: null };
+const helpState: ModeState = { events: [], messages: [], summaryPromise: null };
+
+let currentMode: 'talk' | 'help' = 'talk';
+function getState() { return currentMode === 'talk' ? talkState : helpState; }
+
+// Mode select gaze bridge — resolved by the engine's onSelect when on mode-select screen
+let modeSelectResolve: ((mode: 'talk' | 'help') => void) | null = null;
+
+// ── Session recording ─────────────────────────────────────────────────────────
+
+const recorder = new SessionRecorder();
 
 // ── Next-word transition table ────────────────────────────────────────────────
-// Key = last 1–2 words of composed text (uppercase). Value = 4 suggestions.
-// Lookup: try 2-word key first, then 1-word key, then '' (sentence start).
 
 const TRANSITIONS: Record<string, string[]> = {
   '':           ['I',        'PLEASE',    'HELP',      'YES'       ],
@@ -72,6 +87,18 @@ function getNextWords(text: string): string[] {
   return DEFAULT_WORDS;
 }
 
+// ── Help tiles ────────────────────────────────────────────────────────────────
+
+const HELP_TILES = [
+  { id: 'help-0', emoji: '🆘', label: 'Help me',   speech: 'Help me, please.' },
+  { id: 'help-1', emoji: '😣', label: 'In Pain',   speech: 'I am in pain.' },
+  { id: 'help-2', emoji: '💧', label: 'Water',     speech: 'I need water.' },
+  { id: 'help-3', emoji: '🍽️', label: 'Food',      speech: 'I need food.' },
+  { id: 'help-4', emoji: '🚽', label: 'Bathroom',  speech: 'I need to use the bathroom.' },
+];
+
+const HELP_TILE_IDS = HELP_TILES.map(t => t.id);
+
 // ── Agent response ────────────────────────────────────────────────────────────
 
 function showAgentResponse(text: string) {
@@ -85,12 +112,17 @@ function clearAgentResponse() {
   document.getElementById('agent-response')!.classList.add('hidden');
 }
 
-// ── Text state ────────────────────────────────────────────────────────────────
+// ── Text state (Talk mode only) ───────────────────────────────────────────────
 
 let composedText = '';
 
 function updateDisplay() {
   const el = document.getElementById('text-content')!;
+  if (currentMode === 'help') {
+    el.textContent = 'Instant speak — one look, one message';
+    el.classList.add('placeholder');
+    return;
+  }
   el.textContent = composedText || 'Look at a word to begin…';
   el.classList.toggle('placeholder', !composedText);
 }
@@ -105,15 +137,13 @@ function showScreen(id: string) {
 
 // ── Calibration ───────────────────────────────────────────────────────────────
 
-// 8-point grid: avoids the header text (top ~15%) and the centred video feed (~40-60% centre).
-// Two mid-row side points replace the single centre dot that overlapped the video preview.
 const CALIB_GRID = [
-  { x: 0.1, y: 0.2  }, { x: 0.5, y: 0.2  }, { x: 0.9, y: 0.2  }, // top row — below header
-  { x: 0.08, y: 0.55 },                       { x: 0.92, y: 0.55 }, // mid sides — clear of video
-  { x: 0.1, y: 0.87 },                        { x: 0.9, y: 0.87 }, // bottom corners — centre omitted to clear "Skip" button
+  { x: 0.1, y: 0.2  }, { x: 0.5, y: 0.2  }, { x: 0.9, y: 0.2  },
+  { x: 0.08, y: 0.55 },                       { x: 0.92, y: 0.55 },
+  { x: 0.1, y: 0.87 },                        { x: 0.9, y: 0.87 },
 ];
-const HOLD_MS = 1000; // longer hold = more stable calibration samples
-const CALIB_PRE_DELAY_MS = 250; // wait after click before sampling (lets gaze settle)
+const HOLD_MS = 1000;
+const CALIB_PRE_DELAY_MS = 250;
 const POLL_MS = 33;
 
 function runWebcamCalibration(source: MediaPipeGazeSource): Promise<CalibrationSample[]> {
@@ -133,7 +163,6 @@ function runWebcamCalibration(source: MediaPipeGazeSource): Promise<CalibrationS
       return dot;
     });
 
-    // Replace counter HTML — must query #calib-n AFTER this line
     document.querySelector('.calib-counter')!.innerHTML =
       `Point <span id="calib-n">1</span> / ${CALIB_GRID.length}`;
     const nEl = document.getElementById('calib-n')!;
@@ -166,7 +195,6 @@ function runWebcamCalibration(source: MediaPipeGazeSource): Promise<CalibrationS
       dots[i].classList.add('capturing');
       progressEl.textContent = 'Holding… keep your gaze steady';
 
-      // Brief delay after click lets eye micro-movements settle before sampling
       let timer: ReturnType<typeof setInterval>;
       setTimeout(() => {
         timer = setInterval(() => {
@@ -224,16 +252,15 @@ function speak(text: string) {
   window.speechSynthesis.speak(currentUtterance);
 }
 
-// ── Word board ────────────────────────────────────────────────────────────────
+// ── Word board (Talk mode) ────────────────────────────────────────────────────
 
 const CIRC = 2 * Math.PI * 44;
 
-// Tile IDs: word0–word3, ctrl-UNDO, ctrl-SEND
 const WORD_TILE_IDS = ['word0', 'word1', 'word2', 'word3'];
 const CTRL_UNDO = 'ctrl-UNDO';
 const CTRL_SEND = 'ctrl-SEND';
-const ALL_TILE_IDS = [...WORD_TILE_IDS, CTRL_UNDO, CTRL_SEND];
-const HEADER_BTN_IDS = ['btn-back', 'btn-recalibrate', 'btn-bye'];
+const ALL_TALK_TILE_IDS = [...WORD_TILE_IDS, CTRL_UNDO, CTRL_SEND];
+const HEADER_BTN_IDS = ['btn-back', 'btn-recalibrate', 'btn-bye', 'btn-toggle-talk', 'btn-toggle-help'];
 
 function makeTileHTML(label: string): string {
   return `
@@ -245,6 +272,20 @@ function makeTileHTML(label: string): string {
         stroke-dashoffset="${CIRC.toFixed(2)}"/>
     </svg>
     <div class="tile-prob-bar" style="width:0%"></div>`;
+}
+
+function makeHelpTileHTML(emoji: string, label: string): string {
+  return `
+    <div class="help-inner">
+      <div class="help-emoji">${emoji}</div>
+      <div class="tile-word">${label}</div>
+    </div>
+    <svg class="progress-ring" viewBox="0 0 100 100" aria-hidden="true">
+      <circle class="ring-track" cx="50" cy="50" r="44"/>
+      <circle class="ring-fill" cx="50" cy="50" r="44"
+        stroke-dasharray="${CIRC.toFixed(2)}"
+        stroke-dashoffset="${CIRC.toFixed(2)}"/>
+    </svg>`;
 }
 
 function setWordTileLabels(words: string[], engine: GazeEngine, weights?: number[]) {
@@ -265,10 +306,7 @@ function setWordTileLabels(words: string[], engine: GazeEngine, weights?: number
       bar.style.width = `${pct}%`;
     }
   }
-  if (allEmpty) {
-    showAgentResponse('Please send or undo a word.');
-  }
-  // Re-register targets so dwell detection picks up any rect changes
+  if (allEmpty) showAgentResponse('Please send or undo a word.');
   requestAnimationFrame(() => {
     for (const id of WORD_TILE_IDS) {
       const el = document.getElementById(id);
@@ -279,11 +317,26 @@ function setWordTileLabels(words: string[], engine: GazeEngine, weights?: number
   });
 }
 
-function registerAllTargets(engine: GazeEngine) {
+// Toggle buttons get a much larger hit area so they're easy to fixate on
+function headerPad(id: string) {
+  return (id === 'btn-toggle-talk' || id === 'btn-toggle-help') ? 52 : 28;
+}
+
+function registerHeaderTargets(engine: GazeEngine) {
+  for (const id of HEADER_BTN_IDS) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    const r = el.getBoundingClientRect();
+    const p = headerPad(id);
+    engine.registerTarget({ id, rect: { x: r.left - p, y: r.top - p, width: r.width + p * 2, height: r.height + p * 2 }, label: id });
+  }
+}
+
+function registerTalkTargets(engine: GazeEngine) {
   const W = window.innerWidth;
   const H = window.innerHeight;
 
-  for (const id of ALL_TILE_IDS) {
+  for (const id of ALL_TALK_TILE_IDS) {
     const el = document.getElementById(id);
     if (!el) continue;
     const r = el.getBoundingClientRect();
@@ -293,44 +346,37 @@ function registerAllTargets(engine: GazeEngine) {
     let width  = r.width  + 40;
     let height = r.height + 40;
 
-    // SEND is now on the left — extend hit rect to the left screen edge
-    if (id === CTRL_SEND) {
-      x      = 0;
-      y      = 0;
-      width  = r.right + 20;
-      height = H;
-    }
-    // UNDO is now on the right — extend hit rect to the right screen edge
-    if (id === CTRL_UNDO) {
-      x      = r.left - 20;
-      y      = 0;
-      width  = W - x;
-      height = H;
-    }
+    if (id === CTRL_SEND) { x = 0; y = 0; width = r.right + 20; height = H; }
+    if (id === CTRL_UNDO) { x = r.left - 20; y = 0; width = W - x; height = H; }
 
     engine.registerTarget({ id, rect: { x, y, width, height }, label: id });
   }
 
-  for (const id of HEADER_BTN_IDS) {
-    const el = document.getElementById(id);
-    if (!el) continue;
-    const r = el.getBoundingClientRect();
-    engine.registerTarget({ id, rect: { x: r.left - 24, y: r.top - 24, width: r.width + 48, height: r.height + 48 }, label: id });
-  }
+  registerHeaderTargets(engine);
 }
 
-function buildBoard(engine: GazeEngine) {
+function registerHelpTargets(engine: GazeEngine) {
+  for (const t of HELP_TILES) {
+    const el = document.getElementById(t.id);
+    if (!el) continue;
+    const r = el.getBoundingClientRect();
+    engine.registerTarget({ id: t.id, rect: { x: r.left - 10, y: r.top - 10, width: r.width + 20, height: r.height + 20 }, label: t.label });
+  }
+
+  registerHeaderTargets(engine);
+}
+
+function buildTalkBoard(engine: GazeEngine) {
   const grid = document.getElementById('word-grid')!;
   grid.innerHTML = '';
+  grid.classList.remove('help-mode');
 
-  // UNDO goes first in DOM — CSS places it in col 1 spanning both rows
-  const undo = document.createElement('div');
-  undo.className = 'tile ctrl-tile ctrl-undo';
-  undo.id = CTRL_UNDO;
-  undo.innerHTML = makeTileHTML('⌫ UNDO');
-  grid.appendChild(undo);
+  const send = document.createElement('div');
+  send.className = 'tile ctrl-tile ctrl-send';
+  send.id = CTRL_SEND;
+  send.innerHTML = makeTileHTML('SEND ▶');
+  grid.appendChild(send);
 
-  // Word tiles in cols 2-3
   for (const id of WORD_TILE_IDS) {
     const el = document.createElement('div');
     el.className = 'tile word-tile';
@@ -339,23 +385,65 @@ function buildBoard(engine: GazeEngine) {
     grid.appendChild(el);
   }
 
-  // SEND goes last — CSS places it in col 4 spanning both rows
-  const send = document.createElement('div');
-  send.className = 'tile ctrl-tile ctrl-send';
-  send.id = CTRL_SEND;
-  send.innerHTML = makeTileHTML('SEND ▶');
-  grid.appendChild(send);
+  const undo = document.createElement('div');
+  undo.className = 'tile ctrl-tile ctrl-undo';
+  undo.id = CTRL_UNDO;
+  undo.innerHTML = makeTileHTML('⌫ UNDO');
+  grid.appendChild(undo);
 
   requestAnimationFrame(() => {
-    registerAllTargets(engine);
+    registerTalkTargets(engine);
     refreshWordTiles(engine);
   });
 }
 
-// Optimistic update: show TRANSITIONS immediately, then replace with live /predict result
+function buildHelpBoard(engine: GazeEngine) {
+  const grid = document.getElementById('word-grid')!;
+  grid.innerHTML = '';
+  grid.classList.add('help-mode');
+
+  HELP_TILES.forEach((t, i) => {
+    const el = document.createElement('div');
+    el.className = `tile help-tile help-tile-${i}`;
+    el.id = t.id;
+    el.dataset.helpText = t.speech;
+    el.innerHTML = makeHelpTileHTML(t.emoji, t.label);
+    grid.appendChild(el);
+  });
+
+  requestAnimationFrame(() => registerHelpTargets(engine));
+}
+
+function updateModeToggle() {
+  document.getElementById('btn-toggle-talk')!.classList.toggle('active', currentMode === 'talk');
+  document.getElementById('btn-toggle-help')!.classList.toggle('active', currentMode === 'help');
+}
+
+function switchMode(newMode: 'talk' | 'help', engine: GazeEngine) {
+  if (currentMode === newMode) return;
+  currentMode = newMode;
+  updateModeToggle();
+  engine.clearTargets();
+  clearAgentResponse();
+
+  // Re-register header buttons IMMEDIATELY after clearTargets so the toggle
+  // buttons are never unregistered — prevents the one-frame gap where gaze
+  // leaves the toggle mid-dwell and selection is lost.
+  registerHeaderTargets(engine);
+
+  if (newMode === 'talk') {
+    buildTalkBoard(engine);
+    updateDisplay();
+  } else {
+    buildHelpBoard(engine);
+    updateDisplay();
+  }
+}
+
+// ── Word prediction ───────────────────────────────────────────────────────────
+
 async function refreshWordTiles(engine: GazeEngine) {
   const fallback = getNextWords(composedText);
-  // Show fallback instantly with descending default weights
   setWordTileLabels(fallback, engine, [10, 7, 4, 2]);
 
   try {
@@ -373,37 +461,75 @@ async function refreshWordTiles(engine: GazeEngine) {
       }
     }
   } catch {
-    // keep the fallback already shown
+    // keep fallback
   }
 }
 
+// ── Select handler ────────────────────────────────────────────────────────────
+
 function handleSelect(id: string, engine: GazeEngine) {
+  // Mode select screen
+  if (id === 'mode-card-talk' && modeSelectResolve) {
+    modeSelectResolve('talk'); modeSelectResolve = null; return;
+  }
+  if (id === 'mode-card-help' && modeSelectResolve) {
+    modeSelectResolve('help'); modeSelectResolve = null; return;
+  }
+
+  // Mode toggle on board
+  if (id === 'btn-toggle-talk') { switchMode('talk', engine); return; }
+  if (id === 'btn-toggle-help') { switchMode('help', engine); return; }
+
+  // Header buttons (back, recalibrate, summary)
+  if (HEADER_BTN_IDS.includes(id)) {
+    document.getElementById(id)?.click();
+    return;
+  }
+
+  // Help tiles
+  const helpTile = HELP_TILES.find(t => t.id === id);
+  if (helpTile) {
+    speak(helpTile.speech);
+    getState().events.push({ timestamp: Date.now(), type: 'word_select', value: helpTile.speech });
+    getState().messages.push(helpTile.speech);
+    showAgentResponse(`Speaking: "${helpTile.speech}"`);
+
+    fetch(`${BACKEND_URL}/history`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: USER_ID, message: helpTile.speech, sessionId: SESSION_ID }),
+    }).catch(() => {});
+
+    const el = document.getElementById(id);
+    if (el) { el.classList.remove('selected'); void el.offsetWidth; el.classList.add('selected'); }
+    return;
+  }
+
+  // UNDO
   if (id === CTRL_UNDO) {
     const trimmed = composedText.trimEnd();
     const lastSpace = trimmed.lastIndexOf(' ');
     composedText = lastSpace === -1 ? '' : trimmed.slice(0, lastSpace) + ' ';
-    sessionEvents.push({ timestamp: Date.now(), type: 'undo', value: '' });
+    getState().events.push({ timestamp: Date.now(), type: 'undo', value: '' });
     updateDisplay();
     refreshWordTiles(engine);
     return;
   }
 
+  // SEND
   if (id === CTRL_SEND) {
     const text = composedText.trim();
     if (!text) return;
     speak(text);
-    sessionMessages.push(text);
-    sessionEvents.push({ timestamp: Date.now(), type: 'send', value: text });
+    getState().messages.push(text);
+    getState().events.push({ timestamp: Date.now(), type: 'send', value: text });
     showAgentResponse('…');
 
-    // Persist to MongoDB — fire-and-forget, never blocks the UI
-    const historyPayload = { userId: USER_ID, message: text, sessionId: SESSION_ID };
     fetch(`${BACKEND_URL}/history`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(historyPayload),
+      body: JSON.stringify({ userId: USER_ID, message: text, sessionId: SESSION_ID }),
     }).catch(() => {});
-    // Also save as a reusable phrase so vector search can surface it next session
     fetch(`${BACKEND_URL}/phrases`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -432,17 +558,19 @@ function handleSelect(id: string, engine: GazeEngine) {
         }
       })
       .catch(() => clearAgentResponse());
+
     composedText = '';
     updateDisplay();
     refreshWordTiles(engine);
     return;
   }
 
+  // Word tiles
   const el = document.getElementById(id) as HTMLElement | null;
   const word = el?.dataset.word;
   if (!word) return;
   clearAgentResponse();
-  sessionEvents.push({ timestamp: Date.now(), type: 'word_select', value: word });
+  getState().events.push({ timestamp: Date.now(), type: 'word_select', value: word });
   composedText = (composedText.trimEnd() + ' ' + word + ' ').trimStart();
   updateDisplay();
   refreshWordTiles(engine);
@@ -478,35 +606,95 @@ function renderSummary(s: SessionSummary): string {
     </div>`;
 }
 
+async function generateSummary(state: ModeState): Promise<SessionSummary | null> {
+  if (!state.messages || state.messages.length === 0) return null;
+
+  let videoUrl = '';
+  let videoPublicId = '';
+  try {
+    const duration = Math.round((Date.now() - recorder.startTime) / 1000);
+    const blob = await recorder.stop();
+    try {
+      const upload = await uploadToCloudinary(blob, CLOUDINARY_CLOUD, CLOUDINARY_PRESET);
+      videoUrl = upload.secureUrl;
+      videoPublicId = upload.publicId;
+    } catch {
+      // text-only summary
+    }
+
+    const payload: SessionData = {
+      userId: USER_ID,
+      sessionId: SESSION_ID,
+      videoUrl,
+      videoPublicId,
+      duration,
+      events: state.events,
+      messagesSent: state.messages,
+    };
+
+    const res = await fetch(`${BACKEND_URL}/session/end`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    if (res.status === 400) return null;
+    if (!res.ok) throw new Error(`Backend error ${res.status}`);
+    return await res.json() as SessionSummary;
+  } catch (err) {
+    throw err;
+  }
+}
+
 // ── Board launcher ────────────────────────────────────────────────────────────
 
 async function startBoard(source: GazeSource, calibration?: CalibrationProfile): Promise<GazeEngine> {
   composedText = '';
 
+  // Lower filterAlpha = more EMA smoothing at the source level
   const engine = new GazeEngine(
-    { dwellMs: 1500, confidenceThreshold: 0.25, filterAlpha: 0.15, xGain: 0.75 },
+    { dwellMs: 1500, confidenceThreshold: 0.25, filterAlpha: 0.08, xGain: 0.75 },
     source,
   );
   if (calibration) engine.loadCalibrationProfile(calibration);
 
-  showScreen('screen-board');
-  updateDisplay();
-  buildBoard(engine);
-
   const cursor = document.getElementById('gaze-cursor')!;
   const debugEl = document.getElementById('gaze-debug')!;
   cursor.style.display = 'block';
+
+  // ── Fixation locking ────────────────────────────────────────────────────────
+  // Two-stage filter: EMA (in engine) removes tremor; fixation zone below
+  // prevents the cursor drifting when the eye is actually still.
+  // Within FIXATION_RADIUS px the cursor barely moves (slow drift-correction).
+  // Beyond it, the cursor chases the gaze proportionally fast.
+  const FIXATION_RADIUS = 14; // px — dead-zone while fixating
+  let curX = window.innerWidth  / 2;
+  let curY = window.innerHeight / 2;
+
   engine.onGaze(pt => {
-    moveCursor(pt.x, pt.y);
+    const dx = pt.x - curX;
+    const dy = pt.y - curY;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+
+    if (dist > FIXATION_RADIUS) {
+      // Saccade detected — move cursor at speed proportional to distance
+      const speed = Math.min(0.55, 0.15 + (dist - FIXATION_RADIUS) / FIXATION_RADIUS * 0.35);
+      curX += dx * speed;
+      curY += dy * speed;
+    } else {
+      // Fixation zone — tiny drift-correction so cursor doesn't freeze forever
+      curX += dx * 0.025;
+      curY += dy * 0.025;
+    }
+
+    moveCursor(curX, curY);
     const raw = (mpSource as MediaPipeGazeSource | null)?.lastRaw;
-    if (raw) debugEl.textContent = `raw x:${raw.x.toFixed(3)} y:${raw.y.toFixed(3)}  →  screen x:${Math.round(pt.x)} y:${Math.round(pt.y)}`;
+    if (raw) debugEl.textContent = `raw x:${raw.x.toFixed(3)} y:${raw.y.toFixed(3)}  →  screen x:${Math.round(curX)} y:${Math.round(curY)}`;
   });
 
-  // Track the last tile that was dwelled so we can reset its ring when gaze moves away
   let lastDwellId: string | null = null;
 
   engine.onDwellProgress((id, progress) => {
-    // When gaze moves to a different target, fully reset the previous one
     if (lastDwellId && lastDwellId !== id) {
       const prev = document.getElementById(lastDwellId);
       if (prev) {
@@ -519,11 +707,24 @@ async function startBoard(source: GazeSource, calibration?: CalibrationProfile):
 
     const el = document.getElementById(id);
     if (!el) return;
-    // Header buttons: highlight border as dwell indicator
+
+    // Header buttons — show btn-dwelling highlight + fill progress bar for toggles
     if (HEADER_BTN_IDS.includes(id)) {
       el.classList.toggle('btn-dwelling', progress > 0);
+      if (id === 'btn-toggle-talk' || id === 'btn-toggle-help') {
+        const bar = el.querySelector('.toggle-dwell-bar') as HTMLElement | null;
+        if (bar) bar.style.transform = `scaleX(${progress})`;
+      }
       return;
     }
+    // Mode select cards
+    if (id === 'mode-card-talk' || id === 'mode-card-help') {
+      const fill = el.querySelector('.ring-fill') as SVGCircleElement | null;
+      if (fill) fill.style.strokeDashoffset = String(CIRC * (1 - progress));
+      el.classList.toggle('dwelling', progress > 0);
+      return;
+    }
+    // Empty word tile — skip ring
     if (el.dataset.word === '' && WORD_TILE_IDS.includes(id)) return;
     const fill = el.querySelector('.ring-fill') as SVGCircleElement | null;
     if (fill) fill.style.strokeDashoffset = String(CIRC * (1 - progress));
@@ -531,29 +732,66 @@ async function startBoard(source: GazeSource, calibration?: CalibrationProfile):
   });
 
   engine.onSelect((id) => {
-    // Header buttons — fire their click handler
-    if (HEADER_BTN_IDS.includes(id)) {
-      document.getElementById(id)?.click();
+    // Mode select cards
+    if (id === 'mode-card-talk' || id === 'mode-card-help') {
+      handleSelect(id, engine);
       return;
     }
     const el = document.getElementById(id);
-    if (!el) return;
-    if (el.dataset.word === '' && WORD_TILE_IDS.includes(id)) return;
-    el.classList.remove('selected');
-    void el.offsetWidth;
-    el.classList.add('selected');
-    const fill = el.querySelector('.ring-fill') as SVGCircleElement | null;
+    // Skip empty word tiles
+    if (el?.dataset.word === '' && WORD_TILE_IDS.includes(id)) return;
+    el?.classList.remove('selected');
+    void el?.offsetWidth;
+    el?.classList.add('selected');
+    const fill = el?.querySelector('.ring-fill') as SVGCircleElement | null;
     if (fill) fill.style.strokeDashoffset = String(CIRC);
-    el.classList.remove('dwelling');
+    el?.classList.remove('dwelling');
     handleSelect(id, engine);
   });
 
   window.addEventListener('resize', () => {
     engine.clearTargets();
-    registerAllTargets(engine);
+    registerHeaderTargets(engine);
+    if (currentMode === 'talk') registerTalkTargets(engine);
+    else registerHelpTargets(engine);
   });
 
   await engine.start();
+
+  // ── Mode selection screen ─────────────────────────────────────────────────
+  showScreen('screen-mode-select');
+
+  requestAnimationFrame(() => {
+    for (const cardId of ['mode-card-talk', 'mode-card-help']) {
+      const el = document.getElementById(cardId);
+      if (!el) continue;
+      const r = el.getBoundingClientRect();
+      engine.registerTarget({ id: cardId, rect: { x: r.left, y: r.top, width: r.width, height: r.height }, label: cardId });
+    }
+  });
+
+  currentMode = await new Promise<'talk' | 'help'>(resolve => {
+    modeSelectResolve = resolve;
+    document.getElementById('mode-card-talk')!.addEventListener('click', () => {
+      modeSelectResolve = null; resolve('talk');
+    }, { once: true });
+    document.getElementById('mode-card-help')!.addEventListener('click', () => {
+      modeSelectResolve = null; resolve('help');
+    }, { once: true });
+  });
+
+  // ── Build board for selected mode ─────────────────────────────────────────
+  engine.clearTargets();
+  showScreen('screen-board');
+  updateModeToggle();
+  updateDisplay();
+
+  if (currentMode === 'talk') {
+    buildTalkBoard(engine);
+  } else {
+    buildHelpBoard(engine);
+  }
+
   activeEngine = engine;
   return engine;
 }
@@ -581,6 +819,9 @@ function wireButtons(engine: GazeEngine, calibration: CalibrationProfile | undef
     const btn = document.getElementById('btn-webcam') as HTMLButtonElement;
     btn.textContent = '📷 Start with Webcam →';
     btn.disabled = false;
+    // Reset per-mode state for next session
+    talkState.events = []; talkState.messages = []; talkState.summaryPromise = null;
+    helpState.events = []; helpState.messages = []; helpState.summaryPromise = null;
     showScreen('screen-landing');
   });
 
@@ -595,77 +836,52 @@ function wireButtons(engine: GazeEngine, calibration: CalibrationProfile | undef
   });
 
   document.getElementById('btn-bye')!.addEventListener('click', async () => {
-    engine.stop();
-    document.getElementById('gaze-cursor')!.style.display = 'none';
-
-    const modal = document.getElementById('summary-modal')!;
+    const state = getState();
+    const modal     = document.getElementById('summary-modal')!;
     const loadingEl = document.getElementById('summary-loading')!;
     const contentEl = document.getElementById('summary-content')!;
+
     modal.classList.remove('hidden');
+    document.getElementById('gaze-cursor')!.style.display = 'none';
+
+    if (!state.summaryPromise) {
+      if (state.messages.length === 0) {
+        loadingEl.classList.add('hidden');
+        contentEl.innerHTML = `<p style="text-align:center;color:var(--text-muted);padding:20px 0;">No messages sent in ${currentMode} mode yet.</p>`;
+        return;
+      }
+      state.summaryPromise = generateSummary(state);
+    }
+
     loadingEl.classList.remove('hidden');
     contentEl.innerHTML = '';
 
-    try {
-      const duration = Math.round((Date.now() - recorder.startTime) / 1000);
-      const blob = await recorder.stop();
-
-      // Try to upload video; fall back to text-only summary if upload fails
-      let videoUrl = '';
-      let videoPublicId = '';
-      try {
-        const upload = await uploadToCloudinary(blob, CLOUDINARY_CLOUD, CLOUDINARY_PRESET);
-        videoUrl = upload.secureUrl;
-        videoPublicId = upload.publicId;
-      } catch (uploadErr) {
-        console.warn('Video upload failed — generating text-only summary:', uploadErr);
-      }
-
-      const payload: SessionData = {
-        userId: USER_ID,
-        sessionId: SESSION_ID,
-        videoUrl,
-        videoPublicId,
-        duration,
-        events: sessionEvents,
-        messagesSent: sessionMessages,
-      };
-
-      const res = await fetch(`${BACKEND_URL}/session/end`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-
-      if (res.status === 400) {
-        await res.json();
+    state.summaryPromise
+      .then(summary => {
+        if (modal.classList.contains('hidden')) return;
         loadingEl.classList.add('hidden');
-        contentEl.innerHTML = `<p style="text-align:center;color:var(--text-muted);padding:20px 0;">Insufficient information to generate a report.</p>`;
-        return;
-      }
-      if (!res.ok) {
-        const errText = await res.text();
-        throw new Error(`Backend error ${res.status}: ${errText}`);
-      }
-      const summary: SessionSummary = await res.json();
-
-      loadingEl.classList.add('hidden');
-      contentEl.innerHTML = renderSummary(summary);
-    } catch (err) {
-      loadingEl.classList.add('hidden');
-      contentEl.innerHTML = `<p class="summary-error">Could not generate summary: ${String(err)}</p>`;
-    }
+        if (!summary) {
+          contentEl.innerHTML = `<p style="text-align:center;color:var(--text-muted);padding:20px 0;">Insufficient information to generate a report.</p>`;
+        } else {
+          contentEl.innerHTML = renderSummary(summary);
+        }
+      })
+      .catch(err => {
+        if (modal.classList.contains('hidden')) return;
+        loadingEl.classList.add('hidden');
+        contentEl.innerHTML = `<p class="summary-error">Could not generate summary: ${String(err)}</p>`;
+      });
   });
-
 }
 
 // ── Keyboard shortcuts ────────────────────────────────────────────────────────
-// Space = SEND, Backspace/Delete = UNDO — reliable fallback when gaze can't reach bottom tiles.
 
 function wireKeyboard(getEngine: () => GazeEngine | null) {
   window.addEventListener('keydown', (e) => {
     const engine = getEngine();
     if (!engine) return;
     if (document.body.dataset.screen !== 'screen-board') return;
+    if (currentMode !== 'talk') return;
     if (e.code === 'Space') {
       e.preventDefault();
       handleSelect(CTRL_SEND, engine);
@@ -678,15 +894,10 @@ function wireKeyboard(getEngine: () => GazeEngine | null) {
 
 // ── Entry point ───────────────────────────────────────────────────────────────
 
-// Close summary → always back to landing. Set up once — not inside wireButtons.
 document.getElementById('btn-close-summary')!.addEventListener('click', () => {
   document.getElementById('summary-modal')!.classList.add('hidden');
-  mpSource?.shutdown();
-  mpSource = null;
-  const btn = document.getElementById('btn-webcam') as HTMLButtonElement;
-  btn.textContent = '📷 Start with Webcam →';
-  btn.disabled = false;
-  showScreen('screen-landing');
+  document.getElementById('gaze-cursor')!.style.display = 'block';
+  // Engine continues running — user returns to board
 });
 
 document.getElementById('btn-webcam')!.addEventListener('click', async () => {
@@ -704,10 +915,7 @@ document.getElementById('btn-webcam')!.addEventListener('click', async () => {
     showScreen('screen-calibration');
     await mpSource.init(statusEl);
 
-    // Start recording as soon as camera is ready
-    if (mpSource.stream) {
-      recorder.start(mpSource.stream);
-    }
+    if (mpSource.stream) recorder.start(mpSource.stream);
 
     const samples = await runWebcamCalibration(mpSource);
     const calibration = samples.length >= 2 ? buildCalibrationProfile(samples) : undefined;
