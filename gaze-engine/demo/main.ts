@@ -863,30 +863,36 @@ function wireButtons(engine: GazeEngine) {
     wireButtons(builtEngine);
   });
 
-  document.getElementById('btn-bye')!.addEventListener('click', async () => {
-    const state = getState();
+  document.getElementById('btn-bye')!.addEventListener('click', () => {
+    const state     = getState();
+    console.log('[bye] clicked — events:', state.events.length, 'messages:', state.messages.length);
     const modal     = document.getElementById('summary-modal')!;
     const loadingEl = document.getElementById('summary-loading')!;
     const contentEl = document.getElementById('summary-content')!;
 
+    // Open modal first — nothing after this should block rendering
     modal.classList.remove('hidden');
-    document.getElementById('gaze-cursor')!.style.display = 'none';
-    engine.stop();
 
-    // Render local summary immediately so the modal is never blank
+    const cursor = document.getElementById('gaze-cursor');
+    if (cursor) cursor.style.display = 'none';
+
+    try { engine.stop(); } catch (e) { console.warn('[bye] engine.stop threw:', e); }
+
     loadingEl.classList.add('hidden');
+
+    // Always render something immediately — local fallback is synchronous
+    const snapshot = localFallbackSummary(state);
     if (state.events.length === 0 && state.messages.length === 0) {
       contentEl.innerHTML = `<p style="text-align:center;color:var(--text-muted);padding:20px 0;">No activity recorded in ${currentMode} mode yet.</p>`;
-      return;
+    } else {
+      contentEl.innerHTML = renderSummary(snapshot);
     }
-    contentEl.innerHTML = renderSummary(localFallbackSummary(state));
 
-    // Kick off AI analysis if not already running, then update with richer result
+    // Then try AI analysis in the background
     if (!state.summaryPromise) {
       state.summaryPromise = generateSummary(state);
     }
 
-    // Show spinner over the local summary while waiting for AI
     loadingEl.classList.remove('hidden');
 
     state.summaryPromise
@@ -899,6 +905,7 @@ function wireButtons(engine: GazeEngine) {
       .catch(err => {
         console.error('[summary]', err);
         loadingEl.classList.add('hidden');
+        // local fallback already showing — nothing to do
       });
   });
 
