@@ -47,8 +47,38 @@ load_dotenv()
 
 ASI1_API_KEY = os.getenv("ASI1_API_KEY", "")
 asi1 = AsyncOpenAI(api_key=ASI1_API_KEY, base_url="https://api.asi1.ai/v1")
-
 MODEL = "asi1-mini"
+
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+gemini = AsyncOpenAI(
+    api_key=GEMINI_API_KEY,
+    base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+) if GEMINI_API_KEY else None
+GEMINI_MODEL = "gemini-2.5-flash"
+
+PREDICT_SYSTEM = """\
+You are an AAC (Augmentative and Alternative Communication) next-word predictor for people with \
+ALS, stroke, or severe motor impairment.
+
+Given the patient's current composed phrase, suggest exactly 4 next single words or short phrases \
+(max 3 words each). Span a wide probability range so the patient can express ANY sentence — \
+not only the most common ones.
+
+Ordering rules:
+  words[0]: the single most statistically probable next word (weight 8-10)
+  words[1]: second most probable, still very common (weight 6-8)
+  words[2]: plausible but less frequent — a different topic or register (weight 3-5)
+  words[3]: creative wildcard — unusual, emotional, or domain-specific (weight 1-3)
+
+Respond with ONLY valid JSON (no markdown fences, no explanation):
+{"words": ["W1","W2","W3","W4"], "weights": [9, 7, 4, 2]}
+
+Additional rules:
+- ALL CAPS
+- No duplicates
+- Weights must be integers 1-10; words[0] weight ≥ words[1] ≥ words[2] ≥ words[3]
+- If context is empty, return good sentence starters (I, PLEASE, HELP, CAN YOU)\
+"""
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -288,52 +318,57 @@ async def handle_intent(req: GazeRequest):
 
 
 class PredictRequest(BaseModel):
-    prefix: str = ""   # single letter, e.g. "H"
     context: str = ""  # current composed text, e.g. "I WANT"
+    prefix: str = ""   # optional single-letter filter
 
 
 @app.post("/predict", response_model=dict)
 async def predict_words(req: PredictRequest):
     """
-    Given a starting letter (prefix) or current sentence context, return 4
-    word/phrase completions using the ASI1 LLM.
+    Return 4 next-word suggestions ordered by probability (most → least likely),
+    each with a relative weight so the frontend can visualise likelihood.
+    Uses Gemini (primary) → ASI1 (fallback).
     """
+    context = req.context.strip().upper()
     if req.prefix:
-        prompt = (
-            f"The user started typing with the letter '{req.prefix.upper()}'. "
-            f"Suggest exactly 4 short words or phrases an ALS/stroke patient might want to say "
-            f"that start with '{req.prefix.upper()}'. "
-            f"Reply with ONLY a JSON array of 4 strings, no explanation. Example: [\"HI\", \"HELLO\", \"HELP\", \"HOW ARE YOU\"]"
+        user_prompt = (
+            f'Current phrase: "{context or "(none)"}".\n'
+            f"Filter: all 4 words must start with the letter '{req.prefix.upper()}'."
         )
+    elif context:
+        user_prompt = f'Current phrase: "{context}".\nSuggest the next 4 words/phrases.'
     else:
-        prompt = (
-            f"The patient has typed: \"{req.context.strip()}\". "
-            f"Suggest exactly 4 short words or phrases that naturally follow. "
-            f"Reply with ONLY a JSON array of 4 strings, no explanation. Example: [\"PLEASE\", \"NOW\", \"MORE\", \"THANK YOU\"]"
-        )
+        user_prompt = "The patient has not typed anything yet. Suggest 4 good sentence starters."
 
-    try:
-        resp = await asi1.chat.completions.create(
-            model=MODEL,
-            messages=[
-                {"role": "system", "content": (
-                    "You are an AAC (Augmentative and Alternative Communication) word predictor "
-                    "for people with ALS, stroke, or motor decline. "
-                    "Always respond with ONLY a valid JSON array of exactly 4 strings. "
-                    "Keep each item under 4 words. Use ALL CAPS."
-                )},
-                {"role": "user", "content": prompt},
-            ],
-            temperature=0.3,
-        )
-        raw = _strip_fences(resp.choices[0].message.content)
-        words = json.loads(raw)
-        if isinstance(words, list):
-            return {"words": [str(w).upper()[:30] for w in words[:4]]}
-        raise ValueError("not a list")
-    except Exception as e:
-        print(f"[predict] fallback due to: {e}")
-        return {"words": []}
+    candidates = []
+    if gemini:
+        candidates.append((gemini, GEMINI_MODEL))
+    candidates.append((asi1, MODEL))
+
+    for client, model in candidates:
+        try:
+            resp = await client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": PREDICT_SYSTEM},
+                    {"role": "user",   "content": user_prompt},
+                ],
+                temperature=0.45,
+            )
+            raw = _strip_fences(resp.choices[0].message.content)
+            data = json.loads(raw)
+            words   = [str(w).upper()[:30] for w in data.get("words",   [])[:4]]
+            weights = [max(1, min(10, int(w))) for w in data.get("weights", [10, 7, 4, 2])[:4]]
+            # Pad if model returned fewer than 4
+            while len(words)   < 4: words.append("")
+            while len(weights) < 4: weights.append(1)
+            print(f"[predict/{model}] {words} w={weights}")
+            return {"words": words, "weights": weights}
+        except Exception as e:
+            print(f"[predict] {model} failed: {e}")
+            continue
+
+    return {"words": [], "weights": []}
 
 
 @app.get("/health")

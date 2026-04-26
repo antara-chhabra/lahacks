@@ -1,0 +1,16 @@
+{
+  "name": "@catalyst/claudinary-video",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "tsc"
+  },
+  "dependencies": {
+    "@google/generative-ai": "^0.24.1",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "@types/node": "^20.12.0",
+    "typescript": "^5.4.0"
+  }
+}

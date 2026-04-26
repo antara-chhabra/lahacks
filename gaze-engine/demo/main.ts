@@ -234,10 +234,12 @@ function makeTileHTML(label: string): string {
       <circle class="ring-fill" cx="50" cy="50" r="44"
         stroke-dasharray="${CIRC.toFixed(2)}"
         stroke-dashoffset="${CIRC.toFixed(2)}"/>
-    </svg>`;
+    </svg>
+    <div class="tile-prob-bar" style="width:0%"></div>`;
 }
 
-function setWordTileLabels(words: string[], engine: GazeEngine) {
+function setWordTileLabels(words: string[], engine: GazeEngine, weights?: number[]) {
+  const maxW = weights && weights.length ? Math.max(...weights, 1) : 10;
   for (let i = 0; i < WORD_TILE_IDS.length; i++) {
     const el = document.getElementById(WORD_TILE_IDS[i])!;
     const label = words[i] ?? '';
@@ -245,6 +247,12 @@ function setWordTileLabels(words: string[], engine: GazeEngine) {
     const wordEl = el.querySelector('.tile-word') as HTMLElement;
     if (wordEl) wordEl.textContent = label;
     el.classList.toggle('empty', !label);
+
+    const bar = el.querySelector('.tile-prob-bar') as HTMLElement | null;
+    if (bar) {
+      const pct = weights ? Math.round((weights[i] ?? 0) / maxW * 100) : 0;
+      bar.style.width = `${pct}%`;
+    }
   }
   // Re-register targets so dwell detection picks up any rect changes
   requestAnimationFrame(() => {
@@ -304,7 +312,8 @@ function buildBoard(engine: GazeEngine) {
 // Optimistic update: show TRANSITIONS immediately, then replace with live /predict result
 async function refreshWordTiles(engine: GazeEngine) {
   const fallback = getNextWords(composedText);
-  setWordTileLabels(fallback, engine);
+  // Show fallback instantly with descending default weights
+  setWordTileLabels(fallback, engine, [10, 7, 4, 2]);
 
   try {
     const res = await fetch(`${AGENT_URL}/predict`, {
@@ -313,9 +322,11 @@ async function refreshWordTiles(engine: GazeEngine) {
       body: JSON.stringify({ context: composedText.trim() || '' }),
     });
     if (res.ok) {
-      const { words } = await res.json();
+      const data = await res.json() as { words?: string[]; weights?: number[] };
+      const words   = data.words   ?? [];
+      const weights = data.weights ?? [10, 7, 4, 2];
       if (Array.isArray(words) && words.length === 4) {
-        setWordTileLabels(words, engine);
+        setWordTileLabels(words, engine, weights);
       }
     }
   } catch {

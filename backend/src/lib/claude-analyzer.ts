@@ -78,7 +78,7 @@ Analyze the video frames and session data carefully. Return ONLY a valid JSON ob
 
 Be concise, compassionate, and clinically useful. Do not fabricate details — only report what is observable.`;
 
-  const userContent: Anthropic.ContentBlockParam[] = [
+  const userContent: Anthropic.MessageParam['content'] = [
     ...imageBlocks,
     {
       type: 'text',
