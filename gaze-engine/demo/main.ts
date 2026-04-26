@@ -1,4 +1,4 @@
-import { GazeEngine, WebGazerSource, generateCalibrationGrid } from '@catalyst/gaze-engine';
+import { GazeEngine, WebGazerSource } from '@catalyst/gaze-engine';
 import { SessionRecorder } from '../../claudinary-video/src/recorder';
 import { uploadToCloudinary } from '../../claudinary-video/src/uploader';
 import type { SessionEvent, SessionData, SessionSummary } from '../../claudinary-video/src/types';
@@ -17,7 +17,7 @@ const SESSION_ID = `sess-${Date.now()}`;
 type ModeState = {
   events: SessionEvent[];
   messages: string[];
-  summaryPromise: Promise<SessionSummary | null> | null;
+  summaryPromise: Promise<SessionSummary> | null;
 };
 
 const talkState: ModeState = { events: [], messages: [], summaryPromise: null };
@@ -153,9 +153,25 @@ function showCalibrationVideo(): void {
   v.style.pointerEvents = 'none';
 }
 
+function get7CalibPoints(w: number, h: number): Array<{x: number; y: number}> {
+  const mx  = Math.round(w * 0.07);   // horizontal inset ~7% from edges
+  const top = 140;                     // below the calibration header text
+  const mid = Math.round(h * 0.5);
+  const bot = Math.round(h - 80);
+  return [
+    { x: mx,          y: top },   // top-left
+    { x: w - mx,      y: top },   // top-right
+    { x: mx,          y: mid },   // mid-left
+    { x: w - mx,      y: mid },   // mid-right
+    { x: Math.round(w * 0.25), y: bot },  // bottom-left
+    { x: Math.round(w * 0.5),  y: bot },  // bottom-center
+    { x: Math.round(w * 0.75), y: bot },  // bottom-right
+  ];
+}
+
 function runWebcamCalibration(): Promise<void> {
   return new Promise(resolve => {
-    const pts = generateCalibrationGrid(window.innerWidth, window.innerHeight, 3);
+    const pts = get7CalibPoints(window.innerWidth, window.innerHeight);
     const surface    = document.getElementById('calib-surface')!;
     const progressEl = document.getElementById('calib-progress')!;
     surface.innerHTML = '';
@@ -596,45 +612,74 @@ function renderSummary(s: SessionSummary): string {
     </div>`;
 }
 
-async function generateSummary(state: ModeState): Promise<SessionSummary | null> {
-  if (!state.messages || state.messages.length === 0) return null;
+function localFallbackSummary(state: ModeState): SessionSummary {
+  const wordSelections = state.events
+    .filter(e => e.type === 'word_select')
+    .map(e => e.value);
+  const allMessages = state.messages.length > 0
+    ? state.messages
+    : wordSelections.length > 0 ? [wordSelections.join(' ')] : ['(no messages)'];
+  const totalWords = state.events.filter(e => e.type === 'word_select').length;
+  const sends = state.events.filter(e => e.type === 'send').length;
+  return {
+    emotionalArc: 'Unable to determine — backend unavailable.',
+    bodyLanguage: 'Unable to determine — backend unavailable.',
+    communicationQuality: `Patient selected ${totalWords} word tile(s) and sent ${sends} message(s).`,
+    keyMoments: allMessages.slice(0, 4).map((m, i) => `Message ${i + 1}: "${m}"`),
+    clinicalNotes: 'Backend analysis unavailable. Review session events manually.',
+    generatedAt: Date.now(),
+  };
+}
+
+async function generateSummary(state: ModeState): Promise<SessionSummary> {
+  // Include word-select events as messages when SEND was never pressed
+  const wordSelections = state.events
+    .filter(e => e.type === 'word_select')
+    .map(e => e.value);
+  const effectiveMessages = state.messages.length > 0
+    ? state.messages
+    : wordSelections.length > 0 ? [wordSelections.join(' ')] : [];
+
+  if (effectiveMessages.length === 0) return localFallbackSummary(state);
 
   let videoUrl = '';
   let videoPublicId = '';
-  try {
-    const duration = recorder.isRecording ? Math.round((Date.now() - recorder.startTime) / 1000) : 0;
-    const blob = recorder.isRecording ? await recorder.stop() : null;
-    if (blob && blob.size > 0) {
-      try {
-        const upload = await uploadToCloudinary(blob, CLOUDINARY_CLOUD, CLOUDINARY_PRESET);
-        videoUrl = upload.secureUrl;
-        videoPublicId = upload.publicId;
-      } catch {
-        // text-only summary
-      }
+  const duration = recorder.isRecording ? Math.round((Date.now() - recorder.startTime) / 1000) : 0;
+  const blob = recorder.isRecording ? await recorder.stop() : null;
+  if (blob && blob.size > 0) {
+    try {
+      const upload = await uploadToCloudinary(blob, CLOUDINARY_CLOUD, CLOUDINARY_PRESET);
+      videoUrl = upload.secureUrl;
+      videoPublicId = upload.publicId;
+    } catch {
+      // proceed with text-only summary
     }
+  }
 
-    const payload: SessionData = {
-      userId: USER_ID,
-      sessionId: SESSION_ID,
-      videoUrl,
-      videoPublicId,
-      duration,
-      events: state.events,
-      messagesSent: state.messages,
-    };
+  const payload: SessionData = {
+    userId: USER_ID,
+    sessionId: SESSION_ID,
+    videoUrl,
+    videoPublicId,
+    duration,
+    events: state.events,
+    messagesSent: effectiveMessages,
+  };
 
+  try {
     const res = await fetch(`${BACKEND_URL}/session/end`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
-
-    if (res.status === 400) return null;
-    if (!res.ok) throw new Error(`Backend error ${res.status}`);
+    if (!res.ok) {
+      console.error('[summary] backend returned', res.status);
+      return localFallbackSummary(state);
+    }
     return await res.json() as SessionSummary;
   } catch (err) {
-    throw err;
+    console.error('[summary] fetch failed:', err);
+    return localFallbackSummary(state);
   }
 }
 
@@ -829,9 +874,9 @@ function wireButtons(engine: GazeEngine) {
     engine.stop();
 
     if (!state.summaryPromise) {
-      if (state.messages.length === 0) {
+      if (state.events.length === 0) {
         loadingEl.classList.add('hidden');
-        contentEl.innerHTML = `<p style="text-align:center;color:var(--text-muted);padding:20px 0;">No messages sent in ${currentMode} mode yet.</p>`;
+        contentEl.innerHTML = `<p style="text-align:center;color:var(--text-muted);padding:20px 0;">No activity recorded in ${currentMode} mode yet.</p>`;
         return;
       }
       state.summaryPromise = generateSummary(state);
@@ -844,17 +889,13 @@ function wireButtons(engine: GazeEngine) {
       .then(summary => {
         if (modal.classList.contains('hidden')) return;
         loadingEl.classList.add('hidden');
-        if (!summary) {
-          contentEl.innerHTML = `<p style="text-align:center;color:var(--text-muted);padding:20px 0;">Insufficient information to generate a report.</p>`;
-        } else {
-          contentEl.innerHTML = renderSummary(summary);
-        }
+        contentEl.innerHTML = renderSummary(summary);
       })
       .catch(err => {
         console.error('[summary]', err);
         if (modal.classList.contains('hidden')) return;
         loadingEl.classList.add('hidden');
-        contentEl.innerHTML = `<p class="summary-error">Could not generate summary: ${String(err)}</p>`;
+        contentEl.innerHTML = renderSummary(localFallbackSummary(state));
       });
   });
 
